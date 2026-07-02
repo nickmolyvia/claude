@@ -36,6 +36,34 @@ def test_eur_from_cents():
     assert api.eur_from_cents(None) == 0.0
 
 
+def test_eur_from_wei():
+    # 1 ETH (1e18 wei) at 1500 EUR/ETH = 1500 EUR
+    assert api.eur_from_wei(int(1e18), 1500.0) == 1500.0
+    # a small holding: 0.01 ETH at 1500 = 15 EUR
+    assert abs(api.eur_from_wei(int(1e16), 1500.0) - 15.0) < 1e-6
+    assert api.eur_from_wei(None, 1500.0) == 0.0
+    assert api.eur_from_wei("0", 1500.0) == 0.0
+
+
+def test_floor_price_uses_price_range_wei():
+    # priceRange.min populates even when no offer/publicMinPrices exist.
+    node = {
+        "rarityTyped": "limited",
+        "priceRange": {"min": str(int(1e16)), "max": str(int(2e16))},  # 0.01 ETH
+        "anyPlayer": SAMPLE_PLAYER,
+    }
+    c = api.card_from_json(node, eur_per_eth=1500.0)
+    assert abs(c.price_eur - 15.0) < 1e-6  # falls back to floor when unlisted
+    assert abs(c.recent_sale_prices_eur[0] - 15.0) < 1e-6
+
+
+def test_fetch_eur_per_eth_falls_back_on_error():
+    class _BadSession:
+        def get(self, *a, **k):
+            raise RuntimeError("network down")
+    assert api.fetch_eur_per_eth(_BadSession()) == api.FALLBACK_EUR_PER_ETH
+
+
 def test_player_from_json_reverses_to_oldest_first():
     # SAMPLE_PLAYER lists scores NEWEST-first (65 is newest, 40 is older),
     # mirroring Sorare's so5Scores(last:N). The mapper must reverse to
@@ -141,6 +169,50 @@ def test_no_api_key_omits_header():
     client = api.SorareClient(session=session)  # no key
     client.fetch_market_cards("limited")
     assert "APIKEY" not in session.calls[0]["headers"]
+
+
+class _RoutingSession:
+    """Fake session that returns different payloads per query keyword."""
+    def __init__(self, routes, default):
+        self.routes = routes  # list of (keyword, payload)
+        self.default = default
+        self.calls = []
+
+    def post(self, url, json=None, headers=None, timeout=None):
+        self.calls.append(json)
+        q = (json or {}).get("query", "")
+        for keyword, payload in self.routes:
+            if keyword in q:
+                return _FakeResponse(payload)
+        return _FakeResponse(self.default)
+
+
+def test_fetch_recent_sales_returns_oldest_first_eur():
+    payload = {"data": {"tokens": {"tokenPrices": [
+        {"date": "2026-07-02", "amounts": {"eurCents": 300}},  # newest
+        {"date": "2026-07-01", "amounts": {"eurCents": 100}},  # oldest
+    ]}}}
+    client = api.SorareClient(session=_FakeSession(payload), api_key="k")
+    sales = client.fetch_recent_sales("declan-john", "limited")
+    assert sales == [1.0, 3.0]  # reversed to oldest-first, in EUR
+
+
+def test_fetch_my_cards_enriches_with_recent_sales():
+    # First query (MyCards) returns one owned card; RecentSales returns comps.
+    my_cards = {"data": {"user": {"cards": {"nodes": [SAMPLE_CARD]}}}}
+    sales = {"data": {"tokens": {"tokenPrices": [
+        {"date": "2026-07-02", "amounts": {"eurCents": 5000}},
+        {"date": "2026-07-01", "amounts": {"eurCents": 3000}},
+    ]}}}
+    session = _RoutingSession(
+        routes=[("RecentSales", sales), ("MyCards", my_cards)],
+        default={"data": {}},
+    )
+    client = api.SorareClient(session=session, api_key="k", username="me")
+    cards = client.fetch_my_cards()
+    assert len(cards) == 1
+    # real recent sales replaced the floor self-reference:
+    assert cards[0].recent_sale_prices_eur == [30.0, 50.0]
 
 
 def test_fetch_my_cards_reads_by_username():

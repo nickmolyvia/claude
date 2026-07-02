@@ -1,8 +1,17 @@
 # sorare_value.py
+import sys
 import requests
 
 from src import api, buy, sell, report
 from src.prompts import prompt_filters
+
+# Windows consoles often default to a legacy codepage (e.g. Greek cp1253) that
+# can't print the € symbol, crashing the report. Force UTF-8 output so prices
+# render everywhere.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except (AttributeError, ValueError):
+    pass
 
 
 def run(client, filters, output_fn=print) -> None:

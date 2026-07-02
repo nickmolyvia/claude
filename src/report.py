@@ -10,7 +10,7 @@ def _row(cols, widths):
 def format_buys(picks: list[BuyPick]) -> str:
     if not picks:
         return "No cards match your filters."
-    widths = [3, 22, 18, 10, 9, 6, 6, 40]
+    widths = [3, 22, 18, 10, 9, 6, 6, 60]
     header = _row(["#", "Player", "Club", "Scarcity", "Price €", "Proj", "Value", "Why"], widths)
     lines = ["TOP VALUE-FOR-MONEY SIGNINGS", header, "-" * len(header)]
     for i, p in enumerate(picks, 1):
@@ -22,7 +22,7 @@ def format_buys(picks: list[BuyPick]) -> str:
             f"{p.card.price_eur:.2f}",
             f"{p.projected:.1f}",
             f"{p.value_score:.2f}",
-            p.rationale[:40],
+            p.rationale[:60],
         ], widths))
     return "\n".join(lines)
 
@@ -30,8 +30,8 @@ def format_buys(picks: list[BuyPick]) -> str:
 def format_sells(signals: list[SellSignal]) -> str:
     if not signals:
         return "No cards in collection."
-    widths = [22, 10, 9, 12, 14, 6, 30]
-    header = _row(["Player", "Scarcity", "Price €", "vs History", "Outlook", "Signal", "Reason"], widths)
+    widths = [22, 14, 9, 12, 14, 6, 40]
+    header = _row(["Player", "Scarcity", "Price €", "vs Sales", "Outlook", "Signal", "Reason"], widths)
     lines = ["YOUR COLLECTION — SELL SIGNALS", header, "-" * len(header)]
     for s in signals:
         lines.append(_row([
@@ -41,6 +41,6 @@ def format_sells(signals: list[SellSignal]) -> str:
             f"{s.price_position * 100:+.0f}%",
             s.outlook,
             s.signal,
-            s.reason[:30],
+            s.reason[:40],
         ], widths))
     return "\n".join(lines)

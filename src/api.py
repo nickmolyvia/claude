@@ -39,6 +39,44 @@ def eur_from_cents(eur_cents) -> float:
     return float(eur_cents) / 100.0
 
 
+# Fallback ETH->EUR rate used only if the live rate can't be fetched. Prices
+# on Sorare are quoted in wei (1 ETH = 1e18 wei); priceRange values are wei
+# strings with no fiat conversion in the schema, so we convert ourselves.
+FALLBACK_EUR_PER_ETH = 1440.0
+WEI_PER_ETH = 1e18
+
+
+def eur_from_wei(wei, eur_per_eth: float) -> float:
+    """Convert a wei amount (int or string) to EUR at the given rate."""
+    if wei in (None, "", 0, "0"):
+        return 0.0
+    try:
+        eth = int(wei) / WEI_PER_ETH
+    except (ValueError, TypeError):
+        return 0.0
+    return eth * eur_per_eth
+
+
+def fetch_eur_per_eth(session=None) -> float:
+    """Live ETH->EUR rate from a free public API, or the fallback on failure.
+
+    Kept deliberately simple and defensive: any network/parse problem falls
+    back to FALLBACK_EUR_PER_ETH so the tool never crashes over the rate.
+    """
+    try:
+        import requests as _requests
+        getter = session.get if session is not None else _requests.get
+        resp = getter(
+            "https://api.coingecko.com/api/v3/simple/price"
+            "?ids=ethereum&vs_currencies=eur",
+            timeout=15,
+        )
+        rate = float(resp.json()["ethereum"]["eur"])
+        return rate if rate > 0 else FALLBACK_EUR_PER_ETH
+    except Exception:
+        return FALLBACK_EUR_PER_ETH
+
+
 def appearance_from_so5(node: dict) -> Appearance:
     """Map one So5Score node to an Appearance.
 
@@ -77,38 +115,42 @@ def player_from_json(node: dict) -> Player:
     )
 
 
-def _floor_price_eur(node: dict) -> float:
-    """The card's public minimum (floor) price in EUR, if exposed.
-
-    `publicMinPrices` is a MonetaryAmount and is available even for cards that
-    are NOT currently listed for sale — so it gives owned/held cards a real
-    value instead of 0.0.
-    """
-    floor = node.get("publicMinPrices") or {}
-    return eur_from_cents(floor.get("eurCents"))
-
-
 def _offer_price_eur(node: dict) -> float:
-    """Price from the card's own live single-sale offer, if listed."""
+    """Price from the card's own live single-sale offer, if listed (EUR)."""
     offer = node.get("liveSingleSaleOffer") or {}
     receiver = offer.get("receiverSide") or {}
     amounts = receiver.get("amounts") or {}
     return eur_from_cents(amounts.get("eurCents"))
 
 
-def card_from_json(node: dict) -> Card:
+def _floor_price_eur(node: dict, eur_per_eth: float) -> float:
+    """The card's floor price in EUR.
+
+    Prefers `priceRange.min` (wei; populates even for unlisted/held cards),
+    then falls back to `publicMinPrices.eurCents` when present. This is what
+    gives owned cards a real value instead of 0.00.
+    """
+    price_range = node.get("priceRange") or {}
+    floor = eur_from_wei(price_range.get("min"), eur_per_eth)
+    if floor == 0.0:
+        pmp = node.get("publicMinPrices") or {}
+        floor = eur_from_cents(pmp.get("eurCents"))
+    return floor
+
+
+def card_from_json(node: dict, eur_per_eth: float = FALLBACK_EUR_PER_ETH) -> Card:
     """Map an anyCard node to a Card.
 
     `anyPlayer` is the player behind the card; scarcity is `rarityTyped`.
-    Price priority: the card's live sale offer, else its public floor price,
-    else an explicit priceEur (used by tests). `recent_sale_prices_eur` is
-    seeded with the floor price as the market reference point — the public
-    schema does not expose a per-card recent-sales list without deeper auth,
-    so price_position() compares the asking price against the current market
-    floor rather than a trailing sales average.
+    Price priority: the card's live sale offer (real asking price), else its
+    floor price from priceRange/publicMinPrices, else an explicit priceEur
+    (used by tests). `recent_sale_prices_eur` is seeded with the floor price
+    as the market reference — the public schema does not expose a per-card
+    recent-sales list without deeper auth, so price_position() compares the
+    asking price against the current market floor, not a trailing average.
     """
     player_node = node.get("anyPlayer") or node.get("player") or {}
-    floor = _floor_price_eur(node)
+    floor = _floor_price_eur(node, eur_per_eth)
     price = _offer_price_eur(node)
     if price == 0.0:
         price = floor
@@ -139,6 +181,7 @@ _PLAYER_FIELDS = """
 _CARD_FIELDS = """
   slug
   rarityTyped
+  priceRange { min max }
   publicMinPrices { eurCents }
   liveSingleSaleOffer { receiverSide { amounts { eurCents } } }
   anyPlayer { ... on Player { %s } }
@@ -151,6 +194,13 @@ class SorareClient:
         self.api_key = api_key
         self.username = username
         self.authenticated = False
+        self._eur_per_eth = None  # lazily fetched once, then cached
+
+    def eur_per_eth(self) -> float:
+        """ETH->EUR rate, fetched once per client and cached."""
+        if self._eur_per_eth is None:
+            self._eur_per_eth = fetch_eur_per_eth(self.session)
+        return self._eur_per_eth
 
     def _headers(self) -> dict:
         headers = {"Content-Type": "application/json"}
@@ -212,13 +262,14 @@ class SorareClient:
         data = self._post(query, {"first": first})
         offers = ((data.get("tokens") or {})
                   .get("liveSingleSaleOffers") or {}).get("nodes", [])
+        rate = self.eur_per_eth()
         cards = []
         for offer in offers:
             price = eur_from_cents(
                 ((offer.get("receiverSide") or {}).get("amounts") or {}).get("eurCents")
             )
             for card_node in (offer.get("senderSide") or {}).get("anyCards", []):
-                card = card_from_json(card_node)
+                card = card_from_json(card_node, rate)
                 if card.price_eur == 0.0:
                     card.price_eur = price
                 if card.scarcity == scarcity:
@@ -252,4 +303,48 @@ class SorareClient:
         data = self._post(query, {"slug": self.username})
         nodes = (((data.get("user") or {})
                   .get("cards") or {}).get("nodes", []))
-        return [card_from_json(n) for n in nodes]
+        rate = self.eur_per_eth()
+        cards = [card_from_json(n, rate) for n in nodes]
+        # Enrich each card with its player's real recent sales so the SELL
+        # report's "vs history" is a true recent-sales comparison, not a
+        # floor self-comparison. One extra call per distinct (player, rarity);
+        # cached so repeated players in a collection don't re-fetch.
+        sales_cache: dict = {}
+        for card in cards:
+            slug = card.player.slug
+            key = (slug, card.scarcity)
+            if key not in sales_cache:
+                sales_cache[key] = self.fetch_recent_sales(slug, card.scarcity)
+            sales = sales_cache[key]
+            if sales:
+                card.recent_sale_prices_eur = sales
+        return cards
+
+    def fetch_recent_sales(self, player_slug: str, scarcity: str) -> list:
+        """Recent primary-market sale prices (EUR) for a player+scarcity.
+
+        Uses tokens.tokenPrices, which returns real completed sales (newest
+        first) with an eurCents amount and a date. Returns oldest-first EUR
+        floats so callers can average or trend them. Empty list on any issue.
+        """
+        query = """
+        query RecentSales($slug: String!, $rarity: Rarity!) {
+          tokens {
+            tokenPrices(playerSlug: $slug, rarity: $rarity) {
+              date
+              amounts { eurCents }
+            }
+          }
+        }
+        """
+        try:
+            data = self._post(query, {"slug": player_slug, "rarity": scarcity})
+        except RuntimeError:
+            return []
+        rows = ((data.get("tokens") or {}).get("tokenPrices")) or []
+        prices = []
+        for row in reversed(rows):  # API is newest-first; return oldest-first
+            eur = eur_from_cents(((row.get("amounts") or {}).get("eurCents")))
+            if eur > 0:
+                prices.append(eur)
+        return prices

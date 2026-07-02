@@ -12,7 +12,7 @@ def _card(name="Messi", price=25.0):
 
 
 def test_format_buys_includes_player_and_headers():
-    pick = BuyPick(_card(), projected=70.0, value_score=2.8, rationale="form 70.0 → 2.8 pts/€")
+    pick = BuyPick(_card(), projected=70.0, value_score=2.8, rationale="form 70.0 -> 2.8 pts/EUR")
     out = report.format_buys([pick])
     assert "Messi" in out
     assert "Value" in out

@@ -23,6 +23,24 @@ def test_value_score_zero_price_is_zero():
     assert buy.value_score(c) == 0.0
 
 
+def test_rank_drops_zero_price_cards():
+    cards = [
+        _card("real", 10.0, "limited", 50.0),
+        _card("unpriced", 0.0, "limited", 50.0),  # no price -> dropped
+    ]
+    picks = buy.rank_buys(cards, 0, 100, "limited")
+    assert [p.card.slug for p in picks] == ["real"]
+
+
+def test_rank_drops_zero_form_cards():
+    cards = [
+        _card("scorer", 10.0, "limited", 50.0),
+        _card("no-form", 10.0, "limited", 0.0),  # projected 0 -> dropped
+    ]
+    picks = buy.rank_buys(cards, 0, 100, "limited")
+    assert [p.card.slug for p in picks] == ["scorer"]
+
+
 def test_rank_filters_by_scarcity():
     cards = [
         _card("a", 10.0, "limited", 50.0),
@@ -55,4 +73,4 @@ def test_rank_sorts_by_value_desc_and_limits():
 
 def test_pick_has_rationale():
     picks = buy.rank_buys([_card("a", 10.0, "limited", 50.0)], 0, 100, "limited")
-    assert "pts/€" in picks[0].rationale
+    assert "pts/EUR" in picks[0].rationale

@@ -44,16 +44,22 @@ disabled, so they were confirmed by probing real queries):
 - Scarcity is `rarityTyped` (e.g. `limited`), not `rarity`.
 - Prices: a listed card's `liveSingleSaleOffer` gives EUR via
   `MonetaryAmount.eurCents`. A card that is **not listed** (e.g. one you own
-  and hold) has no offer, so its value falls back to `publicMinPrices`
-  (the card's public floor, also in `eurCents`). `null` everywhere → unpriced.
-  `priceRange { min max }` values are wei strings and are not used.
+  and hold) has no offer, so its value falls back to `priceRange.min` (wei,
+  converted to EUR at the live ETH rate) and then `publicMinPrices.eurCents`.
+  `null` everywhere → unpriced.
 - The market list comes from `tokens.liveSingleSaleOffers`.
+- ETH→EUR conversion: `priceRange` is quoted in wei, and the schema exposes
+  no fiat rate, so the live rate is fetched from CoinGecko (free, no key)
+  with a hardcoded fallback if unreachable.
 
-**SELL "vs History" caveat:** the public schema does not expose a per-card
-recent-sales list without deeper auth, so the SELL report compares your
-card's asking price against the current **market floor** (`publicMinPrices`),
-not a trailing sales average. It still catches "priced well above the floor,"
-but read it as "vs floor," not "vs my own sale history."
+**SELL "vs Sales":** recent completed sales come from
+`tokens.tokenPrices(playerSlug:, rarity:)` — real sale prices (eurCents +
+date, newest-first). For each owned card the report pulls that player's
+recent sales and compares the card's current price against their average.
+A negative % means the card is priced **below** its recent sales (cheap — a
+poor time to sell); a positive % means it's priced **above** recent sales
+(rich — a better time to sell). This costs one extra API call per distinct
+player in your collection, so the SELL report takes a few seconds.
 
 Upcoming-fixture difficulty is not exposed in a simple numeric form by the
 public schema, so the fixture nudge is currently neutral (multiplier 1.0) and
