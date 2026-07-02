@@ -22,9 +22,12 @@ def run(client, filters, output_fn=print) -> None:
 
 
 def main() -> None:
-    api.load_credentials()  # validates presence; raises with guidance if missing
+    creds = api.load_credentials()  # validates presence; raises with guidance if missing
     filters = prompt_filters()
-    client = api.SorareClient(session=requests.Session())
+    client = api.SorareClient(
+        session=requests.Session(),
+        api_key=creds.get("api_key", ""),
+    )
     run(client, filters)
 
 

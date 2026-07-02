@@ -1,4 +1,11 @@
 # tests/test_api.py
+#
+# These mocks mirror the REAL Sorare schema shapes confirmed live in Task 10:
+#   - player: displayName, activeClub.name, so5Scores[].score,
+#     so5Scores[].playerGameStats.{minsPlayed,onGameSheet}
+#   - card: rarityTyped, liveSingleSaleOffer.receiverSide.amounts.eurCents,
+#     anyPlayer (the player behind the card)
+#   - market: tokens.liveSingleSaleOffers.nodes[].senderSide.anyCards[]
 import json
 import pytest
 from src import api
@@ -6,45 +13,53 @@ from src.models import Card
 
 
 SAMPLE_PLAYER = {
-    "slug": "kylian-mbappe",
+    "slug": "kylian-mbappe-lottin",
     "displayName": "Kylian Mbappe",
     "activeClub": {"name": "Real Madrid"},
-    "recentAppearances": [
-        {"score": 65.0, "minutesPlayed": 90, "started": True},
-        {"score": 40.0, "minutesPlayed": 30, "started": False},
-    ],
-    "upcomingFixtures": [
-        {"opponentName": "Getafe", "difficulty": 0.3},
+    "so5Scores": [
+        {"score": 65.0, "playerGameStats": {"minsPlayed": 90, "onGameSheet": True}},
+        {"score": 40.0, "playerGameStats": {"minsPlayed": 30, "onGameSheet": False}},
     ],
 }
 
 SAMPLE_CARD = {
-    "slug": "card-abc",
-    "rarity": "limited",
-    "priceEur": 42.5,
-    "recentSalesEur": [40.0, 44.0, 43.0],
-    "player": SAMPLE_PLAYER,
+    "slug": "kylian-mbappe-lottin-2024-limited-493",
+    "rarityTyped": "limited",
+    "liveSingleSaleOffer": {"receiverSide": {"amounts": {"eurCents": 4250}}},
+    "anyPlayer": SAMPLE_PLAYER,
 }
+
+
+def test_eur_from_cents():
+    assert api.eur_from_cents(119) == 1.19
+    assert api.eur_from_cents(None) == 0.0
 
 
 def test_player_from_json_maps_fields():
     p = api.player_from_json(SAMPLE_PLAYER)
-    assert p.slug == "kylian-mbappe"
+    assert p.slug == "kylian-mbappe-lottin"
     assert p.display_name == "Kylian Mbappe"
     assert p.club == "Real Madrid"
     assert p.recent_appearances[0].so5_score == 65.0
+    assert p.recent_appearances[0].minutes_played == 90
+    assert p.recent_appearances[0].started is True
     assert p.recent_appearances[1].started is False
-    assert p.upcoming_fixtures[0].difficulty == 0.3
 
 
 def test_card_from_json_maps_fields():
     c = api.card_from_json(SAMPLE_CARD)
     assert isinstance(c, Card)
-    assert c.slug == "card-abc"
+    assert c.slug == "kylian-mbappe-lottin-2024-limited-493"
     assert c.scarcity == "limited"
-    assert c.price_eur == 42.5
-    assert c.recent_sale_prices_eur == [40.0, 44.0, 43.0]
+    assert c.price_eur == 42.5  # 4250 cents
     assert c.player.display_name == "Kylian Mbappe"
+
+
+def test_card_from_json_handles_crypto_only_null_price():
+    node = dict(SAMPLE_CARD)
+    node["liveSingleSaleOffer"] = {"receiverSide": {"amounts": {"eurCents": None}}}
+    c = api.card_from_json(node)
+    assert c.price_eur == 0.0  # null eurCents -> 0.0, no crash
 
 
 def test_load_credentials_missing_file_points_to_template(tmp_path):
@@ -75,16 +90,40 @@ class _FakeSession:
         self.calls = []
 
     def post(self, url, json=None, headers=None, timeout=None):
-        self.calls.append({"url": url, "json": json})
+        self.calls.append({"url": url, "json": json, "headers": headers})
         return _FakeResponse(self._payload)
 
 
-def test_fetch_market_cards_maps_nodes():
-    payload = {"data": {"cards": {"nodes": [SAMPLE_CARD]}}}
+def test_fetch_market_cards_maps_offers_and_filters_scarcity():
+    rare_card = dict(SAMPLE_CARD)
+    rare_card = {**SAMPLE_CARD, "rarityTyped": "rare"}
+    payload = {"data": {"tokens": {"liveSingleSaleOffers": {"nodes": [
+        {"receiverSide": {"amounts": {"eurCents": 4250}},
+         "senderSide": {"anyCards": [SAMPLE_CARD]}},
+        {"receiverSide": {"amounts": {"eurCents": 9000}},
+         "senderSide": {"anyCards": [rare_card]}},
+    ]}}}}
     client = api.SorareClient(session=_FakeSession(payload))
     cards = client.fetch_market_cards("limited")
     assert len(cards) == 1
     assert cards[0].player.display_name == "Kylian Mbappe"
+    assert cards[0].scarcity == "limited"
+
+
+def test_api_key_sent_as_header():
+    payload = {"data": {"tokens": {"liveSingleSaleOffers": {"nodes": []}}}}
+    session = _FakeSession(payload)
+    client = api.SorareClient(session=session, api_key="secret-key")
+    client.fetch_market_cards("limited")
+    assert session.calls[0]["headers"]["APIKEY"] == "secret-key"
+
+
+def test_no_api_key_omits_header():
+    payload = {"data": {"tokens": {"liveSingleSaleOffers": {"nodes": []}}}}
+    session = _FakeSession(payload)
+    client = api.SorareClient(session=session)  # no key
+    client.fetch_market_cards("limited")
+    assert "APIKEY" not in session.calls[0]["headers"]
 
 
 def test_post_raises_on_graphql_errors():
