@@ -182,6 +182,52 @@ def test_fetch_market_cards_maps_offers_and_filters_scarcity():
     assert cards[0].scarcity == "limited"
 
 
+class _PagingSession:
+    """Fake session that returns a sequence of payloads, one per call."""
+    def __init__(self, payloads):
+        self.payloads = list(payloads)
+        self.calls = []
+
+    def post(self, url, json=None, headers=None, timeout=None):
+        self.calls.append(json)
+        payload = self.payloads[min(len(self.calls) - 1, len(self.payloads) - 1)]
+        return _FakeResponse(payload)
+
+
+def _offer_page(card, has_next, cursor):
+    return {"data": {"tokens": {"liveSingleSaleOffers": {
+        "pageInfo": {"hasNextPage": has_next, "endCursor": cursor},
+        "nodes": [{"receiverSide": {"amounts": {"eurCents": 4250}},
+                   "senderSide": {"anyCards": [card]}}],
+    }}}}
+
+
+def test_fetch_market_cards_paginates_until_no_next_page():
+    page1_card = {**SAMPLE_CARD, "slug": "card-page-1"}
+    page2_card = {**SAMPLE_CARD, "slug": "card-page-2"}
+    session = _PagingSession([
+        _offer_page(page1_card, has_next=True, cursor="CURSOR1"),
+        _offer_page(page2_card, has_next=False, cursor=None),
+    ])
+    client = api.SorareClient(session=session, api_key="k")
+    cards = client.fetch_market_cards("limited", max_pages=6)
+    slugs = {c.slug for c in cards}
+    assert slugs == {"card-page-1", "card-page-2"}
+    # stopped after 2 calls because page 2 had hasNextPage=False
+    assert len(session.calls) == 2
+    # second call passed the cursor from page 1
+    assert session.calls[1]["variables"]["after"] == "CURSOR1"
+
+
+def test_fetch_market_cards_respects_max_pages():
+    card = {**SAMPLE_CARD, "slug": "endless"}
+    # Always says there's a next page; max_pages must cap the loop.
+    session = _PagingSession([_offer_page(card, has_next=True, cursor="C")])
+    client = api.SorareClient(session=session, api_key="k")
+    client.fetch_market_cards("limited", max_pages=3)
+    assert len(session.calls) == 3
+
+
 def test_api_key_sent_as_header():
     payload = {"data": {"tokens": {"liveSingleSaleOffers": {"nodes": []}}}}
     session = _FakeSession(payload)

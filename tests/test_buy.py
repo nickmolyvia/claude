@@ -42,6 +42,23 @@ def test_rank_drops_zero_form_cards():
     assert [p.card.slug for p in picks] == ["scorer"]
 
 
+def test_rank_dedupes_player_keeping_cheapest():
+    # Same player listed at three prices; only the cheapest (best value) should
+    # survive so one player never occupies multiple slots.
+    cards = [
+        _card("bushiri", 1.29, "limited", 40.0),
+        _card("bushiri", 0.43, "limited", 40.0),  # cheapest -> the keeper
+        _card("bushiri", 1.29, "limited", 40.0),
+        _card("other", 0.50, "limited", 30.0),
+    ]
+    picks = buy.rank_buys(cards, 0, 100, "limited")
+    slugs = [p.card.slug for p in picks]
+    assert slugs.count("bushiri") == 1
+    kept = next(p for p in picks if p.card.slug == "bushiri")
+    assert kept.card.price_eur == 0.43  # kept the best price
+    assert "other" in slugs
+
+
 def test_rank_filters_by_league_tier():
     cards = [
         _card("laliga", 10.0, "limited", 50.0, league="laliga-es"),   # top5

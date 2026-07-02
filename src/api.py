@@ -241,16 +241,18 @@ class SorareClient:
             raise RuntimeError(f"GraphQL error: {messages}")
         return payload.get("data", {})
 
-    def fetch_market_cards(self, scarcity: str, first: int = 50) -> list:
+    def fetch_market_cards(self, scarcity: str, max_pages: int = 6) -> list:
         """Cards currently listed for single-sale, filtered by scarcity.
 
-        Uses tokens.liveSingleSaleOffers; each offer exposes its cards and
-        their player. Requires the API key (depth > 7).
+        Sorare caps liveSingleSaleOffers at 50 per request, so to scan more of
+        the market this paginates with the pageInfo cursor: up to `max_pages`
+        pages (6 * 50 = 300 offers by default). Requires the API key (depth>7).
         """
         query = """
-        query MarketCards($first: Int!) {
+        query MarketCards($after: String) {
           tokens {
-            liveSingleSaleOffers(first: $first) {
+            liveSingleSaleOffers(first: 50, after: $after) {
+              pageInfo { hasNextPage endCursor }
               nodes {
                 receiverSide { amounts { eurCents } }
                 senderSide {
@@ -263,21 +265,27 @@ class SorareClient:
           }
         }
         """ % _CARD_FIELDS
-        data = self._post(query, {"first": first})
-        offers = ((data.get("tokens") or {})
-                  .get("liveSingleSaleOffers") or {}).get("nodes", [])
         rate = self.eur_per_eth()
         cards = []
-        for offer in offers:
-            price = eur_from_cents(
-                ((offer.get("receiverSide") or {}).get("amounts") or {}).get("eurCents")
-            )
-            for card_node in (offer.get("senderSide") or {}).get("anyCards", []):
-                card = card_from_json(card_node, rate)
-                if card.price_eur == 0.0:
-                    card.price_eur = price
-                if card.scarcity == scarcity:
-                    cards.append(card)
+        after = None
+        for _ in range(max_pages):
+            data = self._post(query, {"after": after})
+            conn = ((data.get("tokens") or {}).get("liveSingleSaleOffers") or {})
+            offers = conn.get("nodes", [])
+            for offer in offers:
+                price = eur_from_cents(
+                    ((offer.get("receiverSide") or {}).get("amounts") or {}).get("eurCents")
+                )
+                for card_node in (offer.get("senderSide") or {}).get("anyCards", []):
+                    card = card_from_json(card_node, rate)
+                    if card.price_eur == 0.0:
+                        card.price_eur = price
+                    if card.scarcity == scarcity:
+                        cards.append(card)
+            page_info = conn.get("pageInfo") or {}
+            after = page_info.get("endCursor")
+            if not page_info.get("hasNextPage") or not after:
+                break
         return cards
 
     def fetch_my_cards(self) -> list:

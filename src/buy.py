@@ -50,4 +50,18 @@ def rank_buys(cards, min_price, max_price, scarcity, limit=50, tier="all"):
         vscore = value_score(c)
         picks.append(BuyPick(c, projected, vscore, _rationale(c, projected, vscore)))
     picks.sort(key=lambda p: p.value_score, reverse=True)
-    return picks[:limit]
+    # Dedupe by player: keep only each player's best-value listing. If the same
+    # player is listed at 2.10 and 2.20, the 2.20 row is pointless — a cheaper
+    # price for the identical card already exists. Because the list is sorted
+    # by value descending (and lower price = higher value for the same player),
+    # the first time we see a player is their best listing; later ones are
+    # dropped so one player never occupies multiple slots.
+    seen = set()
+    deduped = []
+    for pick in picks:
+        slug = pick.card.player.slug
+        if slug in seen:
+            continue
+        seen.add(slug)
+        deduped.append(pick)
+    return deduped[:limit]
