@@ -27,6 +27,7 @@ def main() -> None:
     client = api.SorareClient(
         session=requests.Session(),
         api_key=creds.get("api_key", ""),
+        username=creds.get("username", ""),
     )
     run(client, filters)
 

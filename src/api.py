@@ -146,9 +146,10 @@ _CARD_FIELDS = """
 
 
 class SorareClient:
-    def __init__(self, session=None, api_key: str = ""):
+    def __init__(self, session=None, api_key: str = "", username: str = ""):
         self.session = session
         self.api_key = api_key
+        self.username = username
         self.authenticated = False
 
     def _headers(self) -> dict:
@@ -225,11 +226,22 @@ class SorareClient:
         return cards
 
     def fetch_my_cards(self) -> list:
-        """The authenticated user's cards. Requires a real login session."""
+        """The cards on a public Sorare profile, read by username.
+
+        Uses `user(slug:)` rather than `currentUser` — the API key raises the
+        data-depth limit but does NOT authenticate as a specific account
+        (currentUser returns null). Reading a public profile by username needs
+        only the API key. Requires `self.username` to be set.
+        """
+        if not self.username:
+            raise RuntimeError(
+                "No Sorare username set. Add \"username\": \"your-sorare-name\" "
+                "to credentials.json so the SELL report can read your collection."
+            )
         query = """
-        query MyCards {
-          currentUser {
-            anyCards(first: 200) {
+        query MyCards($slug: String!) {
+          user(slug: $slug) {
+            cards(first: 200) {
               nodes {
                 %s
               }
@@ -237,7 +249,7 @@ class SorareClient:
           }
         }
         """ % _CARD_FIELDS
-        data = self._post(query, {})
-        nodes = (((data.get("currentUser") or {})
-                  .get("anyCards") or {}).get("nodes", []))
+        data = self._post(query, {"slug": self.username})
+        nodes = (((data.get("user") or {})
+                  .get("cards") or {}).get("nodes", []))
         return [card_from_json(n) for n in nodes]

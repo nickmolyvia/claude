@@ -143,6 +143,24 @@ def test_no_api_key_omits_header():
     assert "APIKEY" not in session.calls[0]["headers"]
 
 
+def test_fetch_my_cards_reads_by_username():
+    payload = {"data": {"user": {"cards": {"nodes": [SAMPLE_CARD]}}}}
+    session = _FakeSession(payload)
+    client = api.SorareClient(session=session, api_key="k", username="nickmolyvia")
+    cards = client.fetch_my_cards()
+    assert len(cards) == 1
+    assert cards[0].player.display_name == "Kylian Mbappe"
+    # the username is sent as the slug variable
+    assert session.calls[0]["json"]["variables"]["slug"] == "nickmolyvia"
+
+
+def test_fetch_my_cards_without_username_raises():
+    client = api.SorareClient(session=_FakeSession({"data": {}}), api_key="k")
+    with pytest.raises(RuntimeError) as exc:
+        client.fetch_my_cards()
+    assert "username" in str(exc.value).lower()
+
+
 def test_post_raises_on_graphql_errors():
     payload = {"errors": [{"message": "bad query"}]}
     client = api.SorareClient(session=_FakeSession(payload))
