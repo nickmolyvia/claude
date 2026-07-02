@@ -20,7 +20,7 @@ class _FakeClient:
     def wait_for_authentication(self, prompt_fn=input):
         self.authenticated = True
 
-    def fetch_market_cards(self, scarcity):
+    def fetch_market_cards(self, scarcity, max_pages=6, odds_client=None):
         return [c for c in self.market if c.scarcity == scarcity]
 
     def fetch_my_cards(self):

@@ -78,9 +78,32 @@ poor time to sell); a positive % means it's priced **above** recent sales
 (rich — a better time to sell). This costs one extra API call per distinct
 player in your collection, so the SELL report takes a few seconds.
 
-Upcoming-fixture difficulty is not exposed in a simple numeric form by the
-public schema, so the fixture nudge is currently neutral (multiplier 1.0) and
-projections rest on recent form × minutes-reliability.
+## Fixture strength from bet365 odds
+
+The `Proj` value includes a **fixture multiplier** driven by betting odds, not
+Sorare data (Sorare doesn't expose opponent strength, and most leagues have no
+fixtures mid-summer anyway):
+
+- Odds come from **The Odds API** (`the-odds-api.com`), filtered to **bet365**.
+  Get a free key and put it in `credentials.json` as `odds_api_key`. Without a
+  key the multiplier stays neutral (1.0) and the tool works exactly as before.
+- For a club's next match, bet365's home/draw/away odds are converted to
+  implied probabilities and **de-margined** (normalised to sum to 1.0), giving
+  a clean win probability.
+- That probability drives the multiplier: 50% win prob = neutral; a favourite
+  is boosted, an underdog cut. The swing is **±30% for top-5-league** clubs and
+  **±20%** for everyone else.
+- Club names differ between Sorare and the odds feed ("FC Bayern München" vs
+  "Bayern Munich"), so a normaliser + alias table matches them best-effort;
+  unmatched teams fall back to neutral.
+
+Only the ten mapped leagues (see `src/odds.py`) get odds; others stay neutral.
+
+**Not live-verified:** the odds→probability logic is fully unit-tested, but the
+exact Odds API response shape could not be reached from the build environment.
+On your first real run with a key, if a field name differs the client degrades
+to a neutral multiplier rather than crashing — report any mismatch and it's a
+small fix.
 
 ## Design & plan
 

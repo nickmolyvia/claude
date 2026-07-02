@@ -1,8 +1,15 @@
 # src/fair_value.py
 from statistics import mean
 from src.models import Player
+from src import leagues
 
 RELIABILITY_MIN_MINUTES = 60
+
+# How far the fixture multiplier can swing based on de-margined win
+# probability. Top-5 leagues swing wider (their odds are sharper / more
+# meaningful); everyone else swings less.
+FIXTURE_SWING_TOP5 = 0.30
+FIXTURE_SWING_OTHER = 0.20
 
 
 def form_score(player: Player) -> float:
@@ -23,12 +30,21 @@ def minutes_reliability(player: Player) -> float:
 
 
 def fixture_multiplier(player: Player) -> float:
-    fixtures = player.upcoming_fixtures
-    if not fixtures:
+    """Boost/cut based on the club's de-margined win probability next match.
+
+    A 50% win probability is neutral (1.0). Above 50% (favourite) boosts up to
+    +swing; below 50% (underdog) cuts down to -swing. The swing is 30% for
+    top-5-league clubs and 20% for everyone else. When no win probability is
+    available (off-season, unmatched team) the multiplier stays neutral.
+    """
+    prob = player.win_probability
+    if prob is None:
         return 1.0
-    mean_difficulty = mean(f.difficulty for f in fixtures)
-    raw = 1.0 + 0.2 * (0.5 - mean_difficulty)
-    return max(0.9, min(1.1, raw))
+    swing = (FIXTURE_SWING_TOP5
+             if leagues.in_tier(player.league_slug, "top5")
+             else FIXTURE_SWING_OTHER)
+    # prob 0.5 -> 1.0; prob 1.0 -> 1+swing; prob 0.0 -> 1-swing.
+    return 1.0 + swing * (prob - 0.5) * 2.0
 
 
 def projected_points(player: Player) -> float:

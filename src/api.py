@@ -192,6 +192,21 @@ _CARD_FIELDS = """
 """ % _PLAYER_FIELDS
 
 
+def _enrich_with_odds(cards, odds_client) -> None:
+    """Attach a de-margined bet365 win probability to each card's player.
+
+    Looks up the club's next-match win probability by league; leaves it None
+    (neutral fixture multiplier) when there's no odds/fixture or no match.
+    """
+    for card in cards:
+        player = card.player
+        if player.win_probability is not None:
+            continue
+        player.win_probability = odds_client.win_probability(
+            player.club, player.league_slug
+        )
+
+
 class SorareClient:
     def __init__(self, session=None, api_key: str = "", username: str = ""):
         self.session = session
@@ -241,12 +256,16 @@ class SorareClient:
             raise RuntimeError(f"GraphQL error: {messages}")
         return payload.get("data", {})
 
-    def fetch_market_cards(self, scarcity: str, max_pages: int = 6) -> list:
+    def fetch_market_cards(self, scarcity: str, max_pages: int = 6,
+                           odds_client=None) -> list:
         """Cards currently listed for single-sale, filtered by scarcity.
 
         Sorare caps liveSingleSaleOffers at 50 per request, so to scan more of
         the market this paginates with the pageInfo cursor: up to `max_pages`
         pages (6 * 50 = 300 offers by default). Requires the API key (depth>7).
+
+        If `odds_client` is given, each card's player is enriched with a
+        de-margined bet365 win probability for the fixture multiplier.
         """
         query = """
         query MarketCards($after: String) {
@@ -286,6 +305,8 @@ class SorareClient:
             after = page_info.get("endCursor")
             if not page_info.get("hasNextPage") or not after:
                 break
+        if odds_client is not None:
+            _enrich_with_odds(cards, odds_client)
         return cards
 
     def fetch_my_cards(self) -> list:
