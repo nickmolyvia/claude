@@ -1,7 +1,7 @@
 # src/buy.py
 from dataclasses import dataclass
 from src.models import Card
-from src import fair_value
+from src import fair_value, leagues
 
 
 @dataclass
@@ -28,18 +28,21 @@ def _rationale(card: Card, projected: float, vscore: float) -> str:
     )
 
 
-def rank_buys(cards, min_price, max_price, scarcity, limit=50):
+def rank_buys(cards, min_price, max_price, scarcity, limit=50, tier="all"):
     picks = []
     for c in cards:
-        # Filter: right scarcity, within budget, and actually usable — a card
-        # with no price (0) can't have a value computed, and a player with no
-        # projected points (0 recent form) is noise, not a "value" pick. Both
-        # are dropped so the list shows real, priced, in-form signings only.
+        # Filter: right scarcity, within budget, in the chosen league tier, and
+        # actually usable — a card with no price (0) can't have a value
+        # computed, and a player with no projected points (0 recent form) is
+        # noise, not a "value" pick. All are dropped so the list shows real,
+        # priced, in-form signings from the leagues you asked for.
         if c.scarcity != scarcity:
             continue
         if not (min_price <= c.price_eur <= max_price):
             continue
         if c.price_eur <= 0:
+            continue
+        if not leagues.in_tier(c.player.league_slug, tier):
             continue
         projected = fair_value.projected_points(c.player)
         if projected <= 0:

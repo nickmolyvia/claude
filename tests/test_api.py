@@ -15,7 +15,7 @@ from src.models import Card
 SAMPLE_PLAYER = {
     "slug": "kylian-mbappe-lottin",
     "displayName": "Kylian Mbappe",
-    "activeClub": {"name": "Real Madrid"},
+    "activeClub": {"name": "Real Madrid", "domesticLeague": {"slug": "laliga-es"}},
     "so5Scores": [
         {"score": 65.0, "playerGameStats": {"minsPlayed": 90, "onGameSheet": True}},
         {"score": 40.0, "playerGameStats": {"minsPlayed": 30, "onGameSheet": False}},
@@ -25,6 +25,7 @@ SAMPLE_PLAYER = {
 SAMPLE_CARD = {
     "slug": "kylian-mbappe-lottin-2024-limited-493",
     "rarityTyped": "limited",
+    "seasonYear": 2024,
     "publicMinPrices": {"eurCents": 4000},
     "liveSingleSaleOffer": {"receiverSide": {"amounts": {"eurCents": 4250}}},
     "anyPlayer": SAMPLE_PLAYER,
@@ -62,6 +63,32 @@ def test_fetch_eur_per_eth_falls_back_on_error():
         def get(self, *a, **k):
             raise RuntimeError("network down")
     assert api.fetch_eur_per_eth(_BadSession()) == api.FALLBACK_EUR_PER_ETH
+
+
+def test_card_maps_season_year_and_league():
+    c = api.card_from_json(SAMPLE_CARD)
+    assert c.season_year == 2024
+    assert c.player.league_slug == "laliga-es"
+
+
+def test_fetch_recent_sales_passes_season_when_given():
+    payload = {"data": {"tokens": {"tokenPrices": [
+        {"date": "2026-07-02", "amounts": {"eurCents": 100}},
+    ]}}}
+    session = _FakeSession(payload)
+    client = api.SorareClient(session=session, api_key="k")
+    client.fetch_recent_sales("declan-john", "limited", season_year=2024)
+    sent = session.calls[0]["json"]["variables"]
+    assert sent["season"] == 2024  # season-matched comps
+
+
+def test_fetch_recent_sales_omits_season_when_zero():
+    payload = {"data": {"tokens": {"tokenPrices": []}}}
+    session = _FakeSession(payload)
+    client = api.SorareClient(session=session, api_key="k")
+    client.fetch_recent_sales("declan-john", "limited", season_year=0)
+    sent = session.calls[0]["json"]["variables"]
+    assert "season" not in sent
 
 
 def test_player_from_json_reverses_to_oldest_first():

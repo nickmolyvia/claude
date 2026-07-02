@@ -22,6 +22,7 @@ class Player:
     club: str
     recent_appearances: list[Appearance] = field(default_factory=list)
     upcoming_fixtures: list[Fixture] = field(default_factory=list)
+    league_slug: str = ""  # e.g. "laliga-es"; drives the BUY league-tier filter
 
 
 @dataclass
@@ -31,3 +32,4 @@ class Card:
     scarcity: str
     price_eur: float
     recent_sale_prices_eur: list[float] = field(default_factory=list)
+    season_year: int = 0  # e.g. 2024; comps are matched to the same season

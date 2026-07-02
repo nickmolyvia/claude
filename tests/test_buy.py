@@ -3,11 +3,12 @@ from src.models import Appearance, Fixture, Player, Card
 from src import buy
 
 
-def _card(slug, price, scarcity, score, started=True, minutes=90):
+def _card(slug, price, scarcity, score, started=True, minutes=90, league=""):
     player = Player(
         slug=slug, display_name=slug.title(), club="Club",
         recent_appearances=[Appearance(score, minutes, started)],
         upcoming_fixtures=[Fixture("x", 0.5)],
+        league_slug=league,
     )
     return Card(slug=slug, player=player, scarcity=scarcity, price_eur=price,
                 recent_sale_prices_eur=[price])
@@ -39,6 +40,22 @@ def test_rank_drops_zero_form_cards():
     ]
     picks = buy.rank_buys(cards, 0, 100, "limited")
     assert [p.card.slug for p in picks] == ["scorer"]
+
+
+def test_rank_filters_by_league_tier():
+    cards = [
+        _card("laliga", 10.0, "limited", 50.0, league="laliga-es"),   # top5
+        _card("dutch", 10.0, "limited", 50.0, league="eredivisie"),   # top7 only
+        _card("mexico", 10.0, "limited", 50.0, league="liga-mx"),     # never in top10
+    ]
+    top5 = buy.rank_buys(cards, 0, 100, "limited", tier="top5")
+    assert [p.card.slug for p in top5] == ["laliga"]
+
+    top7 = buy.rank_buys(cards, 0, 100, "limited", tier="top7")
+    assert sorted(p.card.slug for p in top7) == ["dutch", "laliga"]
+
+    all_tiers = buy.rank_buys(cards, 0, 100, "limited", tier="all")
+    assert len(all_tiers) == 3  # no league restriction
 
 
 def test_rank_filters_by_scarcity():

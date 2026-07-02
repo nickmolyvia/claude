@@ -106,12 +106,14 @@ def player_from_json(node: dict) -> Player:
     # form by the public schema, so this stays empty; fixture_multiplier()
     # then returns 1.0 and projections rest on form x minutes-reliability.
     fixtures: list[Fixture] = []
+    league = (active_club.get("domesticLeague") or {}).get("slug", "")
     return Player(
         slug=node.get("slug", ""),
         display_name=node.get("displayName", ""),
         club=active_club.get("name", ""),
         recent_appearances=appearances,
         upcoming_fixtures=fixtures,
+        league_slug=league,
     )
 
 
@@ -163,6 +165,7 @@ def card_from_json(node: dict, eur_per_eth: float = FALLBACK_EUR_PER_ETH) -> Car
         scarcity=node.get("rarityTyped", node.get("rarity", "")),
         price_eur=price,
         recent_sale_prices_eur=market_reference,
+        season_year=int(node.get("seasonYear") or 0),
     )
 
 
@@ -171,7 +174,7 @@ def card_from_json(node: dict, eur_per_eth: float = FALLBACK_EUR_PER_ETH) -> Car
 _PLAYER_FIELDS = """
   slug
   displayName
-  activeClub { name }
+  activeClub { name domesticLeague { slug } }
   so5Scores(last: %d) {
     score
     playerGameStats { minsPlayed onGameSheet }
@@ -181,6 +184,7 @@ _PLAYER_FIELDS = """
 _CARD_FIELDS = """
   slug
   rarityTyped
+  seasonYear
   priceRange { min max }
   publicMinPrices { eurCents }
   liveSingleSaleOffer { receiverSide { amounts { eurCents } } }
@@ -312,33 +316,55 @@ class SorareClient:
         sales_cache: dict = {}
         for card in cards:
             slug = card.player.slug
-            key = (slug, card.scarcity)
+            # Match comps to the card's own season-year: a 2024 card is only
+            # compared to 2024 sales, otherwise cheaper old-season sales drag
+            # the average down and distort "vs Sales".
+            key = (slug, card.scarcity, card.season_year)
             if key not in sales_cache:
-                sales_cache[key] = self.fetch_recent_sales(slug, card.scarcity)
+                sales_cache[key] = self.fetch_recent_sales(
+                    slug, card.scarcity, card.season_year
+                )
             sales = sales_cache[key]
             if sales:
                 card.recent_sale_prices_eur = sales
         return cards
 
-    def fetch_recent_sales(self, player_slug: str, scarcity: str) -> list:
+    def fetch_recent_sales(self, player_slug: str, scarcity: str,
+                           season_year: int = 0) -> list:
         """Recent primary-market sale prices (EUR) for a player+scarcity.
 
         Uses tokens.tokenPrices, which returns real completed sales (newest
-        first) with an eurCents amount and a date. Returns oldest-first EUR
-        floats so callers can average or trend them. Empty list on any issue.
+        first) with an eurCents amount and a date. When season_year is given
+        (> 0), comps are restricted to that season so cards are compared
+        like-for-like. Returns oldest-first EUR floats so callers can average
+        or trend them. Empty list on any issue.
         """
-        query = """
-        query RecentSales($slug: String!, $rarity: Rarity!) {
-          tokens {
-            tokenPrices(playerSlug: $slug, rarity: $rarity) {
-              date
-              amounts { eurCents }
+        variables = {"slug": player_slug, "rarity": scarcity}
+        if season_year:
+            query = """
+            query RecentSales($slug: String!, $rarity: Rarity!, $season: Int!) {
+              tokens {
+                tokenPrices(playerSlug: $slug, rarity: $rarity, season: $season) {
+                  date
+                  amounts { eurCents }
+                }
+              }
             }
-          }
-        }
-        """
+            """
+            variables["season"] = season_year
+        else:
+            query = """
+            query RecentSales($slug: String!, $rarity: Rarity!) {
+              tokens {
+                tokenPrices(playerSlug: $slug, rarity: $rarity) {
+                  date
+                  amounts { eurCents }
+                }
+              }
+            }
+            """
         try:
-            data = self._post(query, {"slug": player_slug, "rarity": scarcity})
+            data = self._post(query, variables)
         except RuntimeError:
             return []
         rows = ((data.get("tokens") or {}).get("tokenPrices")) or []

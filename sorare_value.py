@@ -19,7 +19,8 @@ def run(client, filters, output_fn=print) -> None:
 
     market = client.fetch_market_cards(filters.scarcity)
     picks = buy.rank_buys(
-        market, filters.min_price, filters.max_price, filters.scarcity, limit=50
+        market, filters.min_price, filters.max_price, filters.scarcity,
+        limit=50, tier=filters.tier,
     )
     output_fn(report.format_buys(picks))
 

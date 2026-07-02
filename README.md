@@ -16,8 +16,25 @@ EUR price range and scarcity) and flags when to sell cards you already own.
 python sorare_value.py
 ```
 
-The script prompts for min price, max price (EUR), and scarcity, then pauses
-for you to complete authentication before producing the BUY and SELL reports.
+The script prompts for min price, max price (EUR), scarcity, and a league
+tier, then pauses for you to complete authentication before producing the
+BUY and SELL reports.
+
+**League tier (BUY filter):** choose how wide to cast the buy list —
+- `top5` — Premier League, LaLiga, Serie A, Bundesliga, Ligue 1
+- `top7` — top 5 plus Eredivisie and Primeira Liga
+- `top10` — top 7 plus Süper Lig, MLS, and the Jupiler Pro League
+- `all` — every league (no restriction)
+
+Cards from stronger leagues trade richer, so the best *value* picks often sit
+in smaller leagues — expect `top5` to return a short list and `all` to return
+the most options. The tier filters the BUY list only; the SELL report always
+shows every card you own.
+
+**Season-matched comps:** each card carries a `seasonYear` (e.g. 2024). The
+SELL "vs Sales" comparison pulls recent sales for the *same* season only, so a
+2024 card is compared to 2024 sales — otherwise cheaper old-season sales would
+drag the average down and distort the signal.
 
 ## API key (required for the market scan)
 
