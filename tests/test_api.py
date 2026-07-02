@@ -25,6 +25,7 @@ SAMPLE_PLAYER = {
 SAMPLE_CARD = {
     "slug": "kylian-mbappe-lottin-2024-limited-493",
     "rarityTyped": "limited",
+    "publicMinPrices": {"eurCents": 4000},
     "liveSingleSaleOffer": {"receiverSide": {"amounts": {"eurCents": 4250}}},
     "anyPlayer": SAMPLE_PLAYER,
 }
@@ -35,31 +36,48 @@ def test_eur_from_cents():
     assert api.eur_from_cents(None) == 0.0
 
 
-def test_player_from_json_maps_fields():
+def test_player_from_json_reverses_to_oldest_first():
+    # SAMPLE_PLAYER lists scores NEWEST-first (65 is newest, 40 is older),
+    # mirroring Sorare's so5Scores(last:N). The mapper must reverse to
+    # oldest-first so outlook_trend reads chronology correctly.
     p = api.player_from_json(SAMPLE_PLAYER)
     assert p.slug == "kylian-mbappe-lottin"
     assert p.display_name == "Kylian Mbappe"
     assert p.club == "Real Madrid"
-    assert p.recent_appearances[0].so5_score == 65.0
-    assert p.recent_appearances[0].minutes_played == 90
-    assert p.recent_appearances[0].started is True
-    assert p.recent_appearances[1].started is False
+    # oldest first after reversal:
+    assert p.recent_appearances[0].so5_score == 40.0
+    assert p.recent_appearances[0].started is False
+    assert p.recent_appearances[-1].so5_score == 65.0
+    assert p.recent_appearances[-1].minutes_played == 90
+    assert p.recent_appearances[-1].started is True
 
 
-def test_card_from_json_maps_fields():
+def test_card_from_json_prefers_offer_price():
     c = api.card_from_json(SAMPLE_CARD)
     assert isinstance(c, Card)
     assert c.slug == "kylian-mbappe-lottin-2024-limited-493"
     assert c.scarcity == "limited"
-    assert c.price_eur == 42.5  # 4250 cents
+    assert c.price_eur == 42.5  # 4250 cents offer beats 4000 floor
     assert c.player.display_name == "Kylian Mbappe"
 
 
-def test_card_from_json_handles_crypto_only_null_price():
-    node = dict(SAMPLE_CARD)
-    node["liveSingleSaleOffer"] = {"receiverSide": {"amounts": {"eurCents": None}}}
+def test_card_from_json_falls_back_to_floor_when_unlisted():
+    # An owned/held card has no live offer; floor price gives it real value.
+    node = {**SAMPLE_CARD, "liveSingleSaleOffer": None}
     c = api.card_from_json(node)
-    assert c.price_eur == 0.0  # null eurCents -> 0.0, no crash
+    assert c.price_eur == 40.0  # 4000 cents floor
+    assert c.recent_sale_prices_eur == [40.0]  # floor seeded as market reference
+
+
+def test_card_from_json_handles_crypto_only_null_price():
+    node = {
+        **SAMPLE_CARD,
+        "publicMinPrices": None,
+        "liveSingleSaleOffer": {"receiverSide": {"amounts": {"eurCents": None}}},
+    }
+    c = api.card_from_json(node)
+    assert c.price_eur == 0.0  # null everywhere -> 0.0, no crash
+    assert c.recent_sale_prices_eur == []
 
 
 def test_load_credentials_missing_file_points_to_template(tmp_path):
@@ -95,7 +113,6 @@ class _FakeSession:
 
 
 def test_fetch_market_cards_maps_offers_and_filters_scarcity():
-    rare_card = dict(SAMPLE_CARD)
     rare_card = {**SAMPLE_CARD, "rarityTyped": "rare"}
     payload = {"data": {"tokens": {"liveSingleSaleOffers": {"nodes": [
         {"receiverSide": {"amounts": {"eurCents": 4250}},
@@ -132,6 +149,24 @@ def test_post_raises_on_graphql_errors():
     with pytest.raises(RuntimeError) as exc:
         client._post("query {}", {})
     assert "bad query" in str(exc.value)
+
+
+def test_post_raises_on_http_error_status():
+    session = _FakeSession({"whatever": True})
+    session._payload = {"whatever": True}
+    client = api.SorareClient(session=session)
+    # Force a 429 response from the fake session.
+    orig_post = session.post
+
+    def post_429(*a, **k):
+        resp = orig_post(*a, **k)
+        resp.status_code = 429
+        return resp
+
+    session.post = post_429
+    with pytest.raises(RuntimeError) as exc:
+        client._post("query {}", {})
+    assert "429" in str(exc.value)
 
 
 def test_wait_for_authentication_blocks_until_confirmed():

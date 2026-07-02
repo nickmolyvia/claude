@@ -38,14 +38,22 @@ disabled, so they were confirmed by probing real queries):
 
 - Endpoint: `https://api.sorare.com/federation/graphql`
 - Players: `football.player(slug:)`, scores via `so5Scores(last: N) { score
-  playerGameStats { minsPlayed onGameSheet } }`. `onGameSheet` is used as the
-  proxy for "started".
+  playerGameStats { minsPlayed onGameSheet } }`. `onGameSheet` is the proxy
+  for "started". `so5Scores` is returned **newest-first**, so the mapper
+  reverses it to oldest-first (otherwise the SELL outlook would be inverted).
 - Scarcity is `rarityTyped` (e.g. `limited`), not `rarity`.
-- Prices come as `MonetaryAmount.eurCents` on a card's
-  `liveSingleSaleOffer` (already in EUR cents; may be `null` for crypto-only
-  listings, which the mapper treats as unpriced). `priceRange { min max }`
-  values are wei strings and are not used.
+- Prices: a listed card's `liveSingleSaleOffer` gives EUR via
+  `MonetaryAmount.eurCents`. A card that is **not listed** (e.g. one you own
+  and hold) has no offer, so its value falls back to `publicMinPrices`
+  (the card's public floor, also in `eurCents`). `null` everywhere → unpriced.
+  `priceRange { min max }` values are wei strings and are not used.
 - The market list comes from `tokens.liveSingleSaleOffers`.
+
+**SELL "vs History" caveat:** the public schema does not expose a per-card
+recent-sales list without deeper auth, so the SELL report compares your
+card's asking price against the current **market floor** (`publicMinPrices`),
+not a trailing sales average. It still catches "priced well above the floor,"
+but read it as "vs floor," not "vs my own sale history."
 
 Upcoming-fixture difficulty is not exposed in a simple numeric form by the
 public schema, so the fixture nudge is currently neutral (multiplier 1.0) and

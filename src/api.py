@@ -57,8 +57,12 @@ def appearance_from_so5(node: dict) -> Appearance:
 
 def player_from_json(node: dict) -> Player:
     active_club = node.get("activeClub") or {}
+    # Sorare's `so5Scores(last: N)` returns NEWEST-first (confirmed live via
+    # game dates). The fair-value engine and sell.outlook_trend expect
+    # OLDEST-first, so reverse here — otherwise "weakening" / "strengthening"
+    # would be inverted.
     appearances = [
-        appearance_from_so5(s) for s in (node.get("so5Scores") or [])
+        appearance_from_so5(s) for s in reversed(node.get("so5Scores") or [])
     ]
     # Upcoming fixtures with a numeric difficulty are not exposed in a simple
     # form by the public schema, so this stays empty; fixture_multiplier()
@@ -73,12 +77,19 @@ def player_from_json(node: dict) -> Player:
     )
 
 
-def _price_eur_from_card(node: dict) -> float:
-    """Prefer a live single-sale offer's eurCents; fall back to 0.0.
+def _floor_price_eur(node: dict) -> float:
+    """The card's public minimum (floor) price in EUR, if exposed.
 
-    (priceRange values are wei strings needing an ETH/EUR rate to convert;
-    the live offer's eurCents is already fiat, so it is the reliable source.)
+    `publicMinPrices` is a MonetaryAmount and is available even for cards that
+    are NOT currently listed for sale — so it gives owned/held cards a real
+    value instead of 0.0.
     """
+    floor = node.get("publicMinPrices") or {}
+    return eur_from_cents(floor.get("eurCents"))
+
+
+def _offer_price_eur(node: dict) -> float:
+    """Price from the card's own live single-sale offer, if listed."""
     offer = node.get("liveSingleSaleOffer") or {}
     receiver = offer.get("receiverSide") or {}
     amounts = receiver.get("amounts") or {}
@@ -89,19 +100,27 @@ def card_from_json(node: dict) -> Card:
     """Map an anyCard node to a Card.
 
     `anyPlayer` is the player behind the card; scarcity is `rarityTyped`.
+    Price priority: the card's live sale offer, else its public floor price,
+    else an explicit priceEur (used by tests). `recent_sale_prices_eur` is
+    seeded with the floor price as the market reference point — the public
+    schema does not expose a per-card recent-sales list without deeper auth,
+    so price_position() compares the asking price against the current market
+    floor rather than a trailing sales average.
     """
     player_node = node.get("anyPlayer") or node.get("player") or {}
-    price = _price_eur_from_card(node)
+    floor = _floor_price_eur(node)
+    price = _offer_price_eur(node)
+    if price == 0.0:
+        price = floor
     if price == 0.0 and node.get("priceEur") is not None:
         price = float(node.get("priceEur"))
+    market_reference = [floor] if floor > 0 else []
     return Card(
         slug=node.get("slug", ""),
         player=player_from_json(player_node),
         scarcity=node.get("rarityTyped", node.get("rarity", "")),
         price_eur=price,
-        recent_sale_prices_eur=[
-            eur_from_cents(x) for x in node.get("recentSaleEurCents", [])
-        ],
+        recent_sale_prices_eur=market_reference,
     )
 
 
@@ -120,6 +139,7 @@ _PLAYER_FIELDS = """
 _CARD_FIELDS = """
   slug
   rarityTyped
+  publicMinPrices { eurCents }
   liveSingleSaleOffer { receiverSide { amounts { eurCents } } }
   anyPlayer { ... on Player { %s } }
 """ % _PLAYER_FIELDS
@@ -152,6 +172,14 @@ class SorareClient:
             headers=self._headers(),
             timeout=30,
         )
+        status = getattr(resp, "status_code", 200)
+        if status >= 400:
+            # Surface HTTP failures (rate limits, 5xx, auth) with a clear
+            # message instead of an opaque JSON-decode error on an error page.
+            raise RuntimeError(
+                f"Sorare API HTTP {status}. If this is a rate limit (429), "
+                f"wait and retry; if it persists, check your API key."
+            )
         payload = resp.json()
         if payload.get("errors"):
             messages = "; ".join(e.get("message", "?") for e in payload["errors"])
