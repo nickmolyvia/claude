@@ -78,32 +78,30 @@ poor time to sell); a positive % means it's priced **above** recent sales
 (rich — a better time to sell). This costs one extra API call per distinct
 player in your collection, so the SELL report takes a few seconds.
 
-## Fixture strength from bet365 odds
+## Fixture strength from clubelo (Elo model)
 
-The `Proj` value includes a **fixture multiplier** driven by betting odds, not
-Sorare data (Sorare doesn't expose opponent strength, and most leagues have no
-fixtures mid-summer anyway):
+The `Proj` value includes a **fixture multiplier** based on how hard the
+player's next match is. The strength signal comes from **clubelo.com** — a
+free, no-key, non-gambling Elo model (the same Elo foundation bookmakers build
+their prices on):
 
-- Odds come from **The Odds API** (`the-odds-api.com`), filtered to **bet365**.
-  Get a free key and put it in `credentials.json` as `odds_api_key`. Without a
-  key the multiplier stays neutral (1.0) and the tool works exactly as before.
-- For a club's next match, bet365's home/draw/away odds are converted to
-  implied probabilities and **de-margined** (normalised to sum to 1.0), giving
-  a clean win probability.
-- That probability drives the multiplier: 50% win prob = neutral; a favourite
-  is boosted, an underdog cut. The swing is **±30% for top-5-league** clubs and
+- clubelo's `/Fixtures` feed gives, per upcoming match, a full goal-difference
+  probability distribution. Summing the "home wins by N" columns yields a clean
+  home-win probability (mirror for the away side). No bookmaker margin to
+  remove — a model distribution already sums to 1.
+- That win probability drives the multiplier: 50% = neutral; a favourite is
+  boosted, an underdog cut. The swing is **±30% for top-5-league** clubs and
   **±20%** for everyone else.
-- Club names differ between Sorare and the odds feed ("FC Bayern München" vs
-  "Bayern Munich"), so a normaliser + alias table matches them best-effort;
-  unmatched teams fall back to neutral.
+- Club names differ between Sorare and clubelo ("FC Bayern München" vs
+  "Bayern"), so a normaliser + alias table (`src/odds.py`) matches them
+  best-effort; unmatched clubs fall back to neutral.
+- No API key needed. If clubelo can't be reached, the multiplier stays neutral
+  (1.0) and the tool works exactly as before.
 
-Only the ten mapped leagues (see `src/odds.py`) get odds; others stay neutral.
-
-**Not live-verified:** the odds→probability logic is fully unit-tested, but the
-exact Odds API response shape could not be reached from the build environment.
-On your first real run with a key, if a field name differs the client degrades
-to a neutral multiplier rather than crashing — report any mismatch and it's a
-small fix.
+**Seasonal:** clubelo only lists *upcoming* fixtures, so mid-summer the feed is
+nearly empty and almost every player stays neutral — which is fine, since this
+script is meant to be run as the new season approaches, when fixtures (and the
+multiplier) are fully populated.
 
 ## Design & plan
 

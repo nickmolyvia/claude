@@ -3,7 +3,7 @@ import sys
 import requests
 
 from src import api, buy, sell, report
-from src.odds import OddsClient
+from src.fixtures import FixtureClient
 from src.prompts import prompt_filters
 
 # Windows consoles often default to a legacy codepage (e.g. Greek cp1253) that
@@ -15,10 +15,10 @@ except (AttributeError, ValueError):
     pass
 
 
-def run(client, filters, output_fn=print, odds_client=None) -> None:
+def run(client, filters, output_fn=print, fixture_client=None) -> None:
     client.wait_for_authentication()
 
-    market = client.fetch_market_cards(filters.scarcity, odds_client=odds_client)
+    market = client.fetch_market_cards(filters.scarcity, fixture_client=fixture_client)
     picks = buy.rank_buys(
         market, filters.min_price, filters.max_price, filters.scarcity,
         limit=50, tier=filters.tier,
@@ -41,10 +41,10 @@ def main() -> None:
         api_key=creds.get("api_key", ""),
         username=creds.get("username", ""),
     )
-    # Odds are optional: with no odds_api_key the fixture multiplier stays
-    # neutral and the tool works exactly as before.
-    odds_client = OddsClient(api_key=creds.get("odds_api_key", ""), session=session)
-    run(client, filters, odds_client=odds_client)
+    # Fixture strength from clubelo (free, no key). If it can't be reached the
+    # multiplier stays neutral and the tool works exactly as before.
+    fixture_client = FixtureClient(session=session)
+    run(client, filters, fixture_client=fixture_client)
 
 
 if __name__ == "__main__":

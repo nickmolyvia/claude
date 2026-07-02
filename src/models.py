@@ -23,9 +23,9 @@ class Player:
     recent_appearances: list[Appearance] = field(default_factory=list)
     upcoming_fixtures: list[Fixture] = field(default_factory=list)
     league_slug: str = ""  # e.g. "laliga-es"; drives the BUY league-tier filter
-    # Implied win probability for this player's club in its next match, derived
-    # from de-margined bet365 odds. None when no odds/fixture is available, in
-    # which case the fixture multiplier stays neutral (1.0).
+    # Model win probability for this player's club in its next match, from
+    # clubelo's Elo fixtures. None when no fixture/match is available, in which
+    # case the fixture multiplier stays neutral (1.0).
     win_probability: "float | None" = None
 
 
