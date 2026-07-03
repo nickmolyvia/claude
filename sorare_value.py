@@ -2,7 +2,7 @@
 import sys
 import requests
 
-from src import api, buy, sell, report
+from src import api, buy, sell, report, flip
 from src.fixtures import FixtureClient
 from src.prompts import prompt_filters
 
@@ -30,6 +30,12 @@ def run(client, filters, output_fn=print, fixture_client=None) -> None:
     mine = client.fetch_my_cards()
     signals = sell.rank_sells(mine)
     output_fn(report.format_sells(signals))
+
+    output_fn("")  # spacer
+
+    client.enrich_market_with_sales(market)
+    flips = flip.rank_flips(market)
+    output_fn(report.format_flips(flips))
 
 
 def main() -> None:
