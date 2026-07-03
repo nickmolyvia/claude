@@ -78,6 +78,23 @@ poor time to sell); a positive % means it's priced **above** recent sales
 (rich — a better time to sell). This costs one extra API call per distinct
 player in your collection, so the SELL report takes a few seconds.
 
+## FLIP table (arbitrage)
+
+A third report lists **live market listings priced below their recent-sales
+comps** — cards to buy under market value and resell. Unlike the BUY table
+(which dedupes by player), the FLIP table **keeps duplicate listings**: each
+underpriced listing is an independent flip.
+
+A listing qualifies when it clears a **€3.50 floor**, has **≥ 5 recent
+comparable sales** (a trustworthy average and a provable exit), and is
+discounted below comps by at least a **price-tiered threshold**:
+
+- ≤ €10 → 30% · €10–25 → 25% · > €25 → 22.5%
+
+Cheaper cards need a bigger cushion to clear fees; expensive cards clear profit
+on a smaller %. Comps reuse the same `tokens.tokenPrices` source as the SELL
+report, fetched only for cards above the floor to bound the API cost.
+
 ## Fixture strength from clubelo (Elo model)
 
 The `Proj` value includes a **fixture multiplier** based on how hard the
