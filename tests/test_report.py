@@ -2,6 +2,7 @@
 from src.models import Appearance, Fixture, Player, Card
 from src.buy import BuyPick
 from src.sell import SellSignal
+from src.flip import FlipPick
 from src import report
 
 
@@ -33,3 +34,18 @@ def test_format_sells_includes_signal():
 
 def test_format_sells_empty():
     assert "No cards in collection" in report.format_sells([])
+
+
+def test_format_flips_includes_player_and_headers():
+    pick = FlipPick(_card(name="Bargain", price=8.0), comp_avg=12.0,
+                    discount=0.3333, sale_count=6,
+                    rationale="comp avg €12.00 · 33% under · 6 recent sales")
+    out = report.format_flips([pick])
+    assert "Bargain" in out
+    assert "Discount" in out
+    assert "Comp Avg" in out
+    assert "Sales" in out
+
+
+def test_format_flips_empty():
+    assert "No flips found" in report.format_flips([])

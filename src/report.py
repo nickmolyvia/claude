@@ -1,6 +1,7 @@
 # src/report.py
 from src.buy import BuyPick
 from src.sell import SellSignal
+from src.flip import FlipPick
 
 
 def _row(cols, widths):
@@ -42,5 +43,28 @@ def format_sells(signals: list[SellSignal]) -> str:
             s.outlook,
             s.signal,
             s.reason[:40],
+        ], widths))
+    return "\n".join(lines)
+
+
+def format_flips(picks: list[FlipPick]) -> str:
+    if not picks:
+        return "No flips found (no listings below comps)."
+    widths = [22, 18, 12, 9, 10, 10, 7, 7]
+    header = _row([
+        "Player", "Club", "Scarcity", "Price €", "Comp Avg €",
+        "Discount", "Sales", "Season",
+    ], widths)
+    lines = ["FLIP OPPORTUNITIES — LISTED BELOW COMPS", header, "-" * len(header)]
+    for p in picks:
+        lines.append(_row([
+            p.card.player.display_name[:22],
+            p.card.player.club[:18],
+            p.card.scarcity,
+            f"{p.card.price_eur:.2f}",
+            f"{p.comp_avg:.2f}",
+            f"{p.discount * 100:.0f}%",
+            p.sale_count,
+            p.card.season_year,
         ], widths))
     return "\n".join(lines)
