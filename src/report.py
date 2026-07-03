@@ -1,4 +1,5 @@
 # src/report.py
+from datetime import datetime
 from src.buy import BuyPick
 from src.sell import SellSignal
 from src.flip import FlipPick
@@ -68,3 +69,31 @@ def format_flips(picks: list[FlipPick]) -> str:
             p.card.season_year,
         ], widths))
     return "\n".join(lines)
+
+
+def format_time_left(iso_str: str, now: datetime) -> str:
+    """A coarse countdown until an offer expires, or '—' when unknown.
+
+    `now` is passed in (never read from the clock here) so this is
+    deterministic and unit-testable. Empty, unparseable, or already-expired
+    timestamps render as '—'.
+    """
+    if not iso_str:
+        return "—"
+    try:
+        # endDate ends in 'Z' (UTC); fromisoformat needs +00:00 in 3.11.
+        end = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return "—"
+    delta = end - now
+    total = int(delta.total_seconds())
+    if total <= 0:
+        return "—"
+    days, rem = divmod(total, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes = rem // 60
+    if days >= 1:
+        return f"{days}d {hours}h"
+    if hours >= 1:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"

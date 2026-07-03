@@ -1,9 +1,11 @@
 # tests/test_report.py
+from datetime import datetime, timezone
 from src.models import Appearance, Fixture, Player, Card
 from src.buy import BuyPick
 from src.sell import SellSignal
 from src.flip import FlipPick
 from src import report
+from src.report import format_time_left
 
 
 def _card(name="Messi", price=25.0):
@@ -49,3 +51,35 @@ def test_format_flips_includes_player_and_headers():
 
 def test_format_flips_empty():
     assert "No flips found" in report.format_flips([])
+
+
+def _now():
+    return datetime(2026, 7, 3, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def test_time_left_days():
+    # 2 days 4 hours ahead
+    assert format_time_left("2026-07-05T16:00:00Z", _now()) == "2d 4h"
+
+
+def test_time_left_hours_with_minutes():
+    # 1 hour 30 minutes ahead
+    assert format_time_left("2026-07-03T13:30:00Z", _now()) == "1h 30m"
+
+
+def test_time_left_minutes_only():
+    # 45 minutes ahead
+    assert format_time_left("2026-07-03T12:45:00Z", _now()) == "45m"
+
+
+def test_time_left_expired_is_dash():
+    # already past
+    assert format_time_left("2026-07-03T11:00:00Z", _now()) == "—"
+
+
+def test_time_left_empty_is_dash():
+    assert format_time_left("", _now()) == "—"
+
+
+def test_time_left_malformed_is_dash():
+    assert format_time_left("not-a-date", _now()) == "—"
