@@ -1,3 +1,4 @@
+# src/flip.py
 # The FLIP table surfaces live market listings priced below their recent-sales
 # comps — pure arbitrage candidates to buy under market value and resell.
 # Unlike buy.py, duplicate listings of the same player are KEPT: each
@@ -45,7 +46,7 @@ def _rationale(comp_avg: float, discount: float, sale_count: int) -> str:
     )
 
 
-def rank_flips(cards, limit: int = 50) -> list:
+def rank_flips(cards, limit: int = 50) -> list["FlipPick"]:
     """Live listings priced below recent-sales comps, ranked by discount.
 
     Keeps duplicate listings of the same player — each underpriced listing is
