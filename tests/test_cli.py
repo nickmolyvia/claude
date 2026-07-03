@@ -72,3 +72,12 @@ def test_run_prints_flip_table():
     joined = "\n".join(lines)
     assert "FLIP OPPORTUNITIES" in joined
     assert "Bargain" in joined
+
+
+def test_run_flip_table_has_seller_and_time_left_headers():
+    lines = []
+    filters = Filters(min_price=0.0, max_price=1000.0, scarcity="limited", tier="all")
+    sorare_value.run(_FakeClientWithFlip(), filters, output_fn=lines.append)
+    joined = "\n".join(lines)
+    assert "Seller" in joined
+    assert "Time Left" in joined
