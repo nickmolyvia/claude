@@ -95,6 +95,12 @@ Cheaper cards need a bigger cushion to clear fees; expensive cards clear profit
 on a smaller %. Comps reuse the same `tokens.tokenPrices` source as the SELL
 report, fetched only for cards above the floor to bound the API cost.
 
+Each flip row also shows the **Seller** (the listing's Sorare nickname) and
+**Time Left** — a coarse countdown to the offer's expiry (`2d 4h`, `1h 30m`,
+`45m`, or `—` when an offer has no end date). Your **own listings are hidden**
+from the FLIP table, since a card you are already selling is not a buy
+opportunity.
+
 ## Fixture strength from clubelo (Elo model)
 
 The `Proj` value includes a **fixture multiplier** based on how hard the
