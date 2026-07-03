@@ -46,6 +46,13 @@ def eur_from_cents(eur_cents) -> float:
 FALLBACK_EUR_PER_ETH = 1440.0
 WEI_PER_ETH = 1e18
 
+# Fallback fiat rates, used only if the live rates can't be fetched. Sorare
+# lists cards in whichever currency the seller chose (EUR, USD, GBP, or ETH),
+# so a USD-priced listing exposes its price in `usdCents`, GBP in `gbpCents`,
+# etc. — not `eurCents`.
+FALLBACK_EUR_PER_USD = 0.92
+FALLBACK_EUR_PER_GBP = 1.17
+
 
 def eur_from_wei(wei, eur_per_eth: float) -> float:
     """Convert a wei amount (int or string) to EUR at the given rate."""
@@ -56,6 +63,51 @@ def eur_from_wei(wei, eur_per_eth: float) -> float:
     except (ValueError, TypeError):
         return 0.0
     return eth * eur_per_eth
+
+
+def _eur_from_minor_units(cents, eur_per_unit: float) -> float:
+    """Convert a fiat minor-units amount (cents/pence) to EUR at the rate."""
+    if cents in (None, "", 0, "0"):
+        return 0.0
+    try:
+        return (float(cents) / 100.0) * eur_per_unit
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def eur_from_usd_cents(usd_cents, eur_per_usd: float) -> float:
+    """Convert a USD-cents amount to EUR at the given EUR/USD rate."""
+    return _eur_from_minor_units(usd_cents, eur_per_usd)
+
+
+def eur_from_gbp_cents(gbp_cents, eur_per_gbp: float) -> float:
+    """Convert a GBP-pence amount to EUR at the given EUR/GBP rate."""
+    return _eur_from_minor_units(gbp_cents, eur_per_gbp)
+
+
+def _amounts_to_eur(amounts: dict, eur_per_eth: float, eur_per_usd: float,
+                    eur_per_gbp: float = FALLBACK_EUR_PER_GBP) -> float:
+    """A MonetaryAmount -> EUR, honouring whichever currency the price is in.
+
+    Sorare denominates each listing in exactly one of EUR/USD/GBP/ETH and
+    populates only that field (`eurCents` / `usdCents` / `gbpCents` / `wei`);
+    the others come back null. Reading only `eurCents` (as the tool used to)
+    silently zeroed every non-EUR listing, which then fell through to the
+    priceRange floor — a phantom price nobody was actually offering. Prefer
+    EUR, then USD, then GBP, then ETH. 0.0 only when the amount carries no
+    price at all.
+    """
+    amounts = amounts or {}
+    eur = eur_from_cents(amounts.get("eurCents"))
+    if eur > 0:
+        return eur
+    usd = eur_from_usd_cents(amounts.get("usdCents"), eur_per_usd)
+    if usd > 0:
+        return usd
+    gbp = eur_from_gbp_cents(amounts.get("gbpCents"), eur_per_gbp)
+    if gbp > 0:
+        return gbp
+    return eur_from_wei(amounts.get("wei"), eur_per_eth)
 
 
 def fetch_eur_per_eth(session=None) -> float:
@@ -76,6 +128,54 @@ def fetch_eur_per_eth(session=None) -> float:
         return rate if rate > 0 else FALLBACK_EUR_PER_ETH
     except Exception:
         return FALLBACK_EUR_PER_ETH
+
+
+def fetch_eur_per_usd(session=None) -> float:
+    """Live EUR-per-USD rate from a free public API, or the fallback on failure.
+
+    Derived from CoinGecko's ETH price quoted in both EUR and USD (ETH_eur /
+    ETH_usd = EUR per USD) — no extra dependency or API key. Any network/parse
+    problem falls back to FALLBACK_EUR_PER_USD so the tool never crashes.
+    """
+    try:
+        import requests as _requests
+        getter = session.get if session is not None else _requests.get
+        resp = getter(
+            "https://api.coingecko.com/api/v3/simple/price"
+            "?ids=ethereum&vs_currencies=eur,usd",
+            timeout=15,
+        )
+        prices = resp.json()["ethereum"]
+        eur = float(prices["eur"])
+        usd = float(prices["usd"])
+        rate = eur / usd if usd > 0 else 0.0
+        return rate if rate > 0 else FALLBACK_EUR_PER_USD
+    except Exception:
+        return FALLBACK_EUR_PER_USD
+
+
+def fetch_eur_per_gbp(session=None) -> float:
+    """Live EUR-per-GBP rate from a free public API, or the fallback on failure.
+
+    Derived from CoinGecko's ETH price quoted in both EUR and GBP (ETH_eur /
+    ETH_gbp = EUR per GBP) — no extra dependency or API key. Any network/parse
+    problem falls back to FALLBACK_EUR_PER_GBP so the tool never crashes.
+    """
+    try:
+        import requests as _requests
+        getter = session.get if session is not None else _requests.get
+        resp = getter(
+            "https://api.coingecko.com/api/v3/simple/price"
+            "?ids=ethereum&vs_currencies=eur,gbp",
+            timeout=15,
+        )
+        prices = resp.json()["ethereum"]
+        eur = float(prices["eur"])
+        gbp = float(prices["gbp"])
+        rate = eur / gbp if gbp > 0 else 0.0
+        return rate if rate > 0 else FALLBACK_EUR_PER_GBP
+    except Exception:
+        return FALLBACK_EUR_PER_GBP
 
 
 def appearance_from_so5(node: dict) -> Appearance:
@@ -118,12 +218,22 @@ def player_from_json(node: dict) -> Player:
     )
 
 
-def _offer_price_eur(node: dict) -> float:
-    """Price from the card's own live single-sale offer, if listed (EUR)."""
+def _offer_price_eur(node: dict, eur_per_eth: float = FALLBACK_EUR_PER_ETH,
+                     eur_per_usd: float = FALLBACK_EUR_PER_USD,
+                     eur_per_gbp: float = FALLBACK_EUR_PER_GBP) -> float:
+    """Price from the card's own live single-sale offer, if listed (EUR).
+
+    A listing is denominated in EUR, USD, GBP, or ETH; the real asking price
+    lives in whichever field matches (`eurCents` / `usdCents` / `gbpCents` /
+    `wei`). Convert via `_amounts_to_eur` so non-EUR listings are honoured
+    instead of zeroing out and falling through to the priceRange floor (a
+    phantom price nobody is actually offering). 0.0 only when there's no live
+    offer at all.
+    """
     offer = node.get("liveSingleSaleOffer") or {}
     receiver = offer.get("receiverSide") or {}
     amounts = receiver.get("amounts") or {}
-    return eur_from_cents(amounts.get("eurCents"))
+    return _amounts_to_eur(amounts, eur_per_eth, eur_per_usd, eur_per_gbp)
 
 
 def _floor_price_eur(node: dict, eur_per_eth: float) -> float:
@@ -141,20 +251,23 @@ def _floor_price_eur(node: dict, eur_per_eth: float) -> float:
     return floor
 
 
-def card_from_json(node: dict, eur_per_eth: float = FALLBACK_EUR_PER_ETH) -> Card:
+def card_from_json(node: dict, eur_per_eth: float = FALLBACK_EUR_PER_ETH,
+                   eur_per_usd: float = FALLBACK_EUR_PER_USD,
+                   eur_per_gbp: float = FALLBACK_EUR_PER_GBP) -> Card:
     """Map an anyCard node to a Card.
 
     `anyPlayer` is the player behind the card; scarcity is `rarityTyped`.
-    Price priority: the card's live sale offer (real asking price), else its
-    floor price from priceRange/publicMinPrices, else an explicit priceEur
-    (used by tests). `recent_sale_prices_eur` is seeded with the floor price
-    as the market reference — the public schema does not expose a per-card
-    recent-sales list without deeper auth, so price_position() compares the
-    asking price against the current market floor, not a trailing average.
+    Price priority: the card's live sale offer (real asking price in whatever
+    currency the seller chose — EUR/USD/ETH), else its floor price from
+    priceRange/publicMinPrices, else an explicit priceEur (used by tests).
+    `recent_sale_prices_eur` is seeded with the floor price as the market
+    reference — the public schema does not expose a per-card recent-sales list
+    without deeper auth, so price_position() compares the asking price against
+    the current market floor, not a trailing average.
     """
     player_node = node.get("anyPlayer") or node.get("player") or {}
     floor = _floor_price_eur(node, eur_per_eth)
-    price = _offer_price_eur(node)
+    price = _offer_price_eur(node, eur_per_eth, eur_per_usd, eur_per_gbp)
     if price == 0.0:
         price = floor
     if price == 0.0 and node.get("priceEur") is not None:
@@ -188,7 +301,7 @@ _CARD_FIELDS = """
   seasonYear
   priceRange { min max }
   publicMinPrices { eurCents }
-  liveSingleSaleOffer { receiverSide { amounts { eurCents } } }
+  liveSingleSaleOffer { receiverSide { amounts { eurCents usdCents gbpCents wei } } }
   anyPlayer { ... on Player { %s } }
 """ % _PLAYER_FIELDS
 
@@ -215,12 +328,26 @@ class SorareClient:
         self.username = username
         self.authenticated = False
         self._eur_per_eth = None  # lazily fetched once, then cached
+        self._eur_per_usd = None  # lazily fetched once, then cached
+        self._eur_per_gbp = None  # lazily fetched once, then cached
 
     def eur_per_eth(self) -> float:
         """ETH->EUR rate, fetched once per client and cached."""
         if self._eur_per_eth is None:
             self._eur_per_eth = fetch_eur_per_eth(self.session)
         return self._eur_per_eth
+
+    def eur_per_usd(self) -> float:
+        """EUR-per-USD rate, fetched once per client and cached."""
+        if self._eur_per_usd is None:
+            self._eur_per_usd = fetch_eur_per_usd(self.session)
+        return self._eur_per_usd
+
+    def eur_per_gbp(self) -> float:
+        """EUR-per-GBP rate, fetched once per client and cached."""
+        if self._eur_per_gbp is None:
+            self._eur_per_gbp = fetch_eur_per_gbp(self.session)
+        return self._eur_per_gbp
 
     def _headers(self) -> dict:
         headers = {"Content-Type": "application/json"}
@@ -274,7 +401,7 @@ class SorareClient:
             liveSingleSaleOffers(first: 50, after: $after) {
               pageInfo { hasNextPage endCursor }
               nodes {
-                receiverSide { amounts { eurCents } }
+                receiverSide { amounts { eurCents usdCents gbpCents wei } }
                 senderSide {
                   anyCards {
                     %s
@@ -286,6 +413,8 @@ class SorareClient:
         }
         """ % _CARD_FIELDS
         rate = self.eur_per_eth()
+        usd_rate = self.eur_per_usd()
+        gbp_rate = self.eur_per_gbp()
         cards = []
         after = None
         for _ in range(max_pages):
@@ -293,13 +422,19 @@ class SorareClient:
             conn = ((data.get("tokens") or {}).get("liveSingleSaleOffers") or {})
             offers = conn.get("nodes", [])
             for offer in offers:
-                price = eur_from_cents(
-                    ((offer.get("receiverSide") or {}).get("amounts") or {}).get("eurCents")
+                # The offer wrapper's receiverSide is the actual price the buyer
+                # pays for this listing — in whatever currency the seller chose.
+                # This is authoritative: use it as the price when present, so a
+                # USD/GBP/ETH listing is never masked by the priceRange floor
+                # (which produced phantom cheap "flips" nobody was offering).
+                offer_price = _amounts_to_eur(
+                    (offer.get("receiverSide") or {}).get("amounts"),
+                    rate, usd_rate, gbp_rate,
                 )
                 for card_node in (offer.get("senderSide") or {}).get("anyCards", []):
-                    card = card_from_json(card_node, rate)
-                    if card.price_eur == 0.0:
-                        card.price_eur = price
+                    card = card_from_json(card_node, rate, usd_rate, gbp_rate)
+                    if offer_price > 0.0:
+                        card.price_eur = offer_price
                     if card.scarcity == scarcity:
                         cards.append(card)
             page_info = conn.get("pageInfo") or {}

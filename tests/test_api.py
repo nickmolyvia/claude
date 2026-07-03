@@ -46,6 +46,61 @@ def test_eur_from_wei():
     assert api.eur_from_wei("0", 1500.0) == 0.0
 
 
+def test_eur_from_usd_cents():
+    # 100 US cents ($1.00) at 0.92 EUR/USD = 0.92 EUR
+    assert abs(api.eur_from_usd_cents(100, 0.92) - 0.92) < 1e-9
+    assert api.eur_from_usd_cents(None, 0.92) == 0.0
+    assert api.eur_from_usd_cents(0, 0.92) == 0.0
+
+
+def test_eur_from_gbp_cents():
+    # 100 pence (£1.00) at 1.17 EUR/GBP = 1.17 EUR
+    assert abs(api.eur_from_gbp_cents(100, 1.17) - 1.17) < 1e-9
+    assert api.eur_from_gbp_cents(None, 1.17) == 0.0
+
+
+def test_amounts_to_eur_uses_gbp_when_only_gbp_present():
+    # A GBP-denominated offer: only gbpCents populated.
+    eur = api._amounts_to_eur(
+        {"eurCents": None, "usdCents": None, "gbpCents": 48, "wei": None},
+        1500.0, 0.9, 1.17,
+    )
+    assert abs(eur - (0.48 * 1.17)) < 1e-9
+
+
+def test_amounts_to_eur_prefers_eur_then_usd_then_wei():
+    # EUR wins outright
+    assert api._amounts_to_eur(
+        {"eurCents": 500, "usdCents": 999, "wei": str(int(1e18))}, 1500.0, 0.9
+    ) == 5.0
+    # No EUR -> USD used
+    assert abs(api._amounts_to_eur(
+        {"eurCents": None, "usdCents": 200, "wei": None}, 1500.0, 0.9
+    ) - 1.8) < 1e-9
+    # No EUR/USD -> wei used
+    assert abs(api._amounts_to_eur(
+        {"eurCents": None, "usdCents": None, "wei": str(int(1e16))}, 1500.0, 0.9
+    ) - 15.0) < 1e-9
+    # Nothing priced -> 0.0
+    assert api._amounts_to_eur(
+        {"eurCents": None, "usdCents": None, "wei": None}, 1500.0, 0.9
+    ) == 0.0
+
+
+def test_offer_price_uses_usd_when_eur_null():
+    # A USD-denominated live offer: eurCents/wei null, usdCents populated.
+    node = {
+        "liveSingleSaleOffer": {
+            "receiverSide": {"amounts": {
+                "eurCents": None, "usdCents": 67, "wei": None,
+                "referenceCurrency": "USD",
+            }}
+        }
+    }
+    eur = api._offer_price_eur(node, eur_per_eth=1500.0, eur_per_usd=0.92)
+    assert abs(eur - 0.6164) < 1e-4  # 0.67 USD * 0.92
+
+
 def test_floor_price_uses_price_range_wei():
     # priceRange.min populates even when no offer/publicMinPrices exist.
     node = {
@@ -114,6 +169,26 @@ def test_card_from_json_prefers_offer_price():
     assert c.scarcity == "limited"
     assert c.price_eur == 42.5  # 4250 cents offer beats 4000 floor
     assert c.player.display_name == "Kylian Mbappe"
+
+
+def test_card_from_json_uses_offer_wei_not_floor_when_eur_null():
+    # Regression: most live listings are priced in ETH, so the offer's
+    # `eurCents` is null but `wei` is populated. The tool must price from the
+    # REAL offer (wei -> EUR), NOT fall through to priceRange.min (a historical
+    # floor that isn't the current asking price). Priced-from-floor cards were
+    # phantom listings — cheap numbers nobody was actually offering.
+    node = {
+        "rarityTyped": "limited",
+        "seasonYear": 2024,
+        "priceRange": {"min": str(int(1e15)), "max": str(int(2e16))},  # floor 0.001 ETH = €1.50
+        "liveSingleSaleOffer": {
+            "receiverSide": {"amounts": {"eurCents": None, "wei": str(int(5e15))}}  # 0.005 ETH = €7.50
+        },
+        "anyPlayer": SAMPLE_PLAYER,
+    }
+    c = api.card_from_json(node, eur_per_eth=1500.0)
+    # Must be the real offer price (€7.50), not the €1.50 floor.
+    assert abs(c.price_eur - 7.50) < 1e-6
 
 
 def test_card_from_json_falls_back_to_floor_when_unlisted():
