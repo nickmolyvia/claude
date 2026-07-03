@@ -242,6 +242,19 @@ class _FakeSession:
         return _FakeResponse(self._payload)
 
 
+def _market_payload_with_seller(nickname, slug, end_date, card=SAMPLE_CARD):
+    return {"data": {"tokens": {"liveSingleSaleOffers": {
+        "pageInfo": {"hasNextPage": False, "endCursor": None},
+        "nodes": [{
+            "endDate": end_date,
+            "sender": {"nickname": nickname, "slug": slug},
+            "receiverSide": {"amounts": {"eurCents": 4250, "usdCents": None,
+                                         "gbpCents": None, "wei": None}},
+            "senderSide": {"anyCards": [card]},
+        }],
+    }}}}
+
+
 def test_fetch_market_cards_maps_offers_and_filters_scarcity():
     rare_card = {**SAMPLE_CARD, "rarityTyped": "rare"}
     payload = {"data": {"tokens": {"liveSingleSaleOffers": {"nodes": [
@@ -439,3 +452,32 @@ def test_enrich_market_with_sales_floors_and_caches(monkeypatch):
     assert above2.recent_sale_prices_eur == [10.0, 11.0, 12.0, 13.0, 14.0]
     # only one fetch for the shared (slug, scarcity, season) key
     assert calls == [("star", "limited", 2024)]
+
+
+def test_market_card_captures_seller_and_end_date():
+    payload = _market_payload_with_seller(
+        "satonio", "satonio", "2026-07-03T09:11:19Z")
+    client = api.SorareClient(session=_FakeSession(payload), api_key="k")
+    cards = client.fetch_market_cards("limited")
+    assert len(cards) == 1
+    assert cards[0].seller_nickname == "satonio"
+    assert cards[0].offer_end_date == "2026-07-03T09:11:19Z"
+
+
+def test_market_skips_own_listings_case_insensitive():
+    payload = _market_payload_with_seller("Me", "MyName", "2026-07-03T09:11:19Z")
+    # username differs only by case -> the offer is the user's own -> skipped
+    client = api.SorareClient(session=_FakeSession(payload), api_key="k",
+                              username="myname")
+    cards = client.fetch_market_cards("limited")
+    assert cards == []
+
+
+def test_market_keeps_other_sellers():
+    payload = _market_payload_with_seller("other", "otherguy",
+                                          "2026-07-03T09:11:19Z")
+    client = api.SorareClient(session=_FakeSession(payload), api_key="k",
+                              username="myname")
+    cards = client.fetch_market_cards("limited")
+    assert len(cards) == 1
+    assert cards[0].seller_nickname == "other"

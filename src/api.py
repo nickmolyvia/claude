@@ -401,6 +401,8 @@ class SorareClient:
             liveSingleSaleOffers(first: 50, after: $after) {
               pageInfo { hasNextPage endCursor }
               nodes {
+                endDate
+                sender { ... on User { nickname slug } }
                 receiverSide { amounts { eurCents usdCents gbpCents wei } }
                 senderSide {
                   anyCards {
@@ -424,17 +426,26 @@ class SorareClient:
             for offer in offers:
                 # The offer wrapper's receiverSide is the actual price the buyer
                 # pays for this listing — in whatever currency the seller chose.
-                # This is authoritative: use it as the price when present, so a
-                # USD/GBP/ETH listing is never masked by the priceRange floor
-                # (which produced phantom cheap "flips" nobody was offering).
                 offer_price = _amounts_to_eur(
                     (offer.get("receiverSide") or {}).get("amounts"),
                     rate, usd_rate, gbp_rate,
                 )
+                sender = offer.get("sender") or {}
+                seller_nickname = sender.get("nickname") or ""
+                seller_slug = sender.get("slug") or ""
+                # A card the user is already selling is not a buy opportunity —
+                # skip their own listings entirely (case-insensitive slug match).
+                if (self.username
+                        and seller_slug.strip().lower()
+                        == self.username.strip().lower()):
+                    continue
+                end_date = offer.get("endDate") or ""
                 for card_node in (offer.get("senderSide") or {}).get("anyCards", []):
                     card = card_from_json(card_node, rate, usd_rate, gbp_rate)
                     if offer_price > 0.0:
                         card.price_eur = offer_price
+                    card.seller_nickname = seller_nickname
+                    card.offer_end_date = end_date
                     if card.scarcity == scarcity:
                         cards.append(card)
             page_info = conn.get("pageInfo") or {}
