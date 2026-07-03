@@ -26,3 +26,49 @@ def threshold_for(price: float) -> float:
     if price <= 25:
         return 0.25
     return 0.225
+
+
+@dataclass
+class FlipPick:
+    card: Card
+    comp_avg: float
+    discount: float
+    sale_count: int
+    rationale: str
+
+
+def _rationale(comp_avg: float, discount: float, sale_count: int) -> str:
+    return (
+        f"comp avg €{comp_avg:.2f} · "
+        f"{discount * 100:.0f}% under · "
+        f"{sale_count} recent sales"
+    )
+
+
+def rank_flips(cards, limit: int = 50) -> list:
+    """Live listings priced below recent-sales comps, ranked by discount.
+
+    Keeps duplicate listings of the same player — each underpriced listing is
+    its own flip. A card qualifies when it clears the price floor, has at least
+    MIN_SALE_COUNT recent comps with a positive average, and is discounted at
+    least threshold_for(price) below that average.
+    """
+    picks = []
+    for card in cards:
+        if card.price_eur < FLOOR_PRICE_EUR:
+            continue
+        sales = card.recent_sale_prices_eur
+        if len(sales) < MIN_SALE_COUNT:
+            continue
+        comp_avg = mean(sales)
+        if comp_avg <= 0:
+            continue
+        discount = (comp_avg - card.price_eur) / comp_avg
+        if discount < threshold_for(card.price_eur):
+            continue
+        picks.append(FlipPick(
+            card, comp_avg, discount, len(sales),
+            _rationale(comp_avg, discount, len(sales)),
+        ))
+    picks.sort(key=lambda p: p.discount, reverse=True)
+    return picks[:limit]
