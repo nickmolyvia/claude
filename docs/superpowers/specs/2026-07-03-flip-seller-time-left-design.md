@@ -66,7 +66,7 @@ A helper `format_time_left(iso_str: str, now: datetime) -> str`:
 - `delta = end - now`. If `delta <= 0` (already expired) → `"—"`.
 - Otherwise coarse buckets:
   - `>= 1 day` → `"{d}d {h}h"` (e.g. `2d 4h`)
-  - `>= 1 hour` → `"{h}h"` (e.g. `18h`)
+  - `>= 1 hour` → `"{h}h {m}m"` (e.g. `1h 30m`)
   - else → `"{m}m"` (e.g. `45m`)
 
 `now` is a **parameter**, never read inside the helper, so the function is
@@ -106,7 +106,7 @@ block. No other change to the run order (BUY → SELL → FLIP).
 - **Self-listing filter:** an offer whose `sender.slug == username` is
   excluded; an offer from another seller is kept. Empty username → no
   filtering.
-- **`format_time_left`:** days (`2d 4h`), hours (`18h`), minutes (`45m`),
+- **`format_time_left`:** days (`2d 4h`), hours (`1h 30m`), minutes (`45m`),
   already-expired → `—`, empty string → `—`, malformed string → `—`. All with
   an injected fixed `now`.
 - **`format_flips`:** header includes `Seller` and `Time Left`; a sample row
