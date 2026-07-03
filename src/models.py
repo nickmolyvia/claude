@@ -37,3 +37,7 @@ class Card:
     price_eur: float
     recent_sale_prices_eur: list[float] = field(default_factory=list)
     season_year: int = 0  # e.g. 2024; comps are matched to the same season
+    # Offer-level metadata for the FLIP table, set in fetch_market_cards. Blank
+    # for cards not sourced from a live market offer (e.g. owned cards).
+    seller_nickname: str = ""
+    offer_end_date: str = ""  # raw ISO-8601 UTC string; formatted at display
