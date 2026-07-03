@@ -38,19 +38,36 @@ def test_format_sells_empty():
     assert "No cards in collection" in report.format_sells([])
 
 
+def _flip_now():
+    return datetime(2026, 7, 3, 12, 0, 0, tzinfo=timezone.utc)
+
+
 def test_format_flips_includes_player_and_headers():
-    pick = FlipPick(_card(name="Bargain", price=8.0), comp_avg=12.0,
-                    discount=0.3333, sale_count=6,
+    card = _card(name="Bargain", price=8.0)
+    card.seller_nickname = "satonio"
+    card.offer_end_date = "2026-07-03T13:30:00Z"  # 1h 30m ahead of _flip_now
+    pick = FlipPick(card, comp_avg=12.0, discount=0.3333, sale_count=6,
                     rationale="comp avg €12.00 · 33% under · 6 recent sales")
-    out = report.format_flips([pick])
+    out = report.format_flips([pick], _flip_now())
     assert "Bargain" in out
     assert "Discount" in out
-    assert "Comp Avg" in out
-    assert "Sales" in out
+    assert "Seller" in out
+    assert "Time Left" in out
+    assert "satonio" in out
+    assert "1h 30m" in out
+
+
+def test_format_flips_blank_seller_and_no_end_date():
+    card = _card(name="NoMeta", price=8.0)  # seller_nickname="" , offer_end_date=""
+    pick = FlipPick(card, comp_avg=12.0, discount=0.3333, sale_count=6,
+                    rationale="x")
+    out = report.format_flips([pick], _flip_now())
+    assert "NoMeta" in out
+    assert "—" in out  # no end date -> dash
 
 
 def test_format_flips_empty():
-    assert "No flips found" in report.format_flips([])
+    assert "No flips found" in report.format_flips([], _flip_now())
 
 
 def _now():

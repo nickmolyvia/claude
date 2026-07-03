@@ -48,13 +48,13 @@ def format_sells(signals: list[SellSignal]) -> str:
     return "\n".join(lines)
 
 
-def format_flips(picks: list[FlipPick]) -> str:
+def format_flips(picks: list["FlipPick"], now: datetime) -> str:
     if not picks:
         return "No flips found (no listings below comps)."
-    widths = [22, 18, 12, 9, 10, 10, 7, 7]
+    widths = [22, 18, 12, 9, 10, 10, 7, 7, 16, 10]
     header = _row([
         "Player", "Club", "Scarcity", "Price €", "Comp Avg €",
-        "Discount", "Sales", "Season",
+        "Discount", "Sales", "Season", "Seller", "Time Left",
     ], widths)
     lines = ["FLIP OPPORTUNITIES — LISTED BELOW COMPS", header, "-" * len(header)]
     for p in picks:
@@ -67,6 +67,8 @@ def format_flips(picks: list[FlipPick]) -> str:
             f"{p.discount * 100:.0f}%",
             p.sale_count,
             p.card.season_year,
+            p.card.seller_nickname[:16],
+            format_time_left(p.card.offer_end_date, now),
         ], widths))
     return "\n".join(lines)
 

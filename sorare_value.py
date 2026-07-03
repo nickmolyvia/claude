@@ -1,6 +1,7 @@
 # sorare_value.py
 import sys
 import requests
+from datetime import datetime, timezone
 
 from src import api, buy, sell, report, flip
 from src.fixtures import FixtureClient
@@ -35,7 +36,8 @@ def run(client, filters, output_fn=print, fixture_client=None) -> None:
 
     client.enrich_market_with_sales(market)
     flips = flip.rank_flips(market)
-    output_fn(report.format_flips(flips))
+    now = datetime.now(timezone.utc)
+    output_fn(report.format_flips(flips, now))
 
 
 def main() -> None:
