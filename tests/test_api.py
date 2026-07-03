@@ -336,3 +336,31 @@ def test_wait_for_authentication_blocks_until_confirmed():
     client = api.SorareClient(session=_FakeSession({"data": {}}))
     client.wait_for_authentication(prompt_fn=lambda _="": "")
     assert client.authenticated is True
+
+
+def _mkcard(slug, price, scarcity="limited", season=2024):
+    from src.models import Appearance, Player
+    p = Player(slug, slug.title(), "FC", [Appearance(50, 90, True)])
+    return Card(slug + "-c", p, scarcity, price, [], season)
+
+
+def test_enrich_market_with_sales_floors_and_caches(monkeypatch):
+    client = api.SorareClient(session=None, api_key="k", username="u")
+    calls = []
+
+    def fake_recent(slug, scarcity, season_year=0):
+        calls.append((slug, scarcity, season_year))
+        return [10.0, 11.0, 12.0, 13.0, 14.0]
+
+    monkeypatch.setattr(client, "fetch_recent_sales", fake_recent)
+
+    below = _mkcard("cheap", 2.0)     # under €3.50 floor -> not enriched, no call
+    above1 = _mkcard("star", 8.0)     # enriched
+    above2 = _mkcard("star", 9.0)     # same key -> served from cache, no 2nd call
+    client.enrich_market_with_sales([below, above1, above2])
+
+    assert below.recent_sale_prices_eur == []          # untouched
+    assert above1.recent_sale_prices_eur == [10.0, 11.0, 12.0, 13.0, 14.0]
+    assert above2.recent_sale_prices_eur == [10.0, 11.0, 12.0, 13.0, 14.0]
+    # only one fetch for the shared (slug, scarcity, season) key
+    assert calls == [("star", "limited", 2024)]

@@ -15,6 +15,7 @@
 import json
 import os
 from src.models import Appearance, Fixture, Player, Card
+from src import flip
 
 SORARE_GRAPHQL_URL = "https://api.sorare.com/federation/graphql"
 
@@ -403,3 +404,25 @@ class SorareClient:
             if eur > 0:
                 prices.append(eur)
         return prices
+
+    def enrich_market_with_sales(self, cards) -> None:
+        """Attach real recent-sales comps to market cards above the price floor.
+
+        Market cards from fetch_market_cards carry only a floor reference, not
+        real recent sales (unlike owned cards). The FLIP pass needs true comps,
+        so this fills them in — but only for cards at/above flip.FLOOR_PRICE_EUR,
+        which bounds the added API cost. One fetch per distinct
+        (slug, scarcity, season_year), cached like fetch_my_cards.
+        """
+        sales_cache: dict = {}
+        for card in cards:
+            if card.price_eur < flip.FLOOR_PRICE_EUR:
+                continue
+            key = (card.player.slug, card.scarcity, card.season_year)
+            if key not in sales_cache:
+                sales_cache[key] = self.fetch_recent_sales(
+                    card.player.slug, card.scarcity, card.season_year
+                )
+            sales = sales_cache[key]
+            if sales:
+                card.recent_sale_prices_eur = sales
