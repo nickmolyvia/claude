@@ -85,10 +85,12 @@ def format_time_left(iso_str: str, now: datetime) -> str:
     try:
         # endDate ends in 'Z' (UTC); fromisoformat needs +00:00 in 3.11.
         end = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        # Inside the try so a tz-naive `end` (a timestamp lacking 'Z'/offset
+        # parses fine but is naive) subtracted from a tz-aware `now` raises
+        # TypeError here and renders '—' instead of crashing the whole report.
+        total = int((end - now).total_seconds())
     except (ValueError, TypeError):
         return "—"
-    delta = end - now
-    total = int(delta.total_seconds())
     if total <= 0:
         return "—"
     days, rem = divmod(total, 86400)

@@ -100,3 +100,9 @@ def test_time_left_empty_is_dash():
 
 def test_time_left_malformed_is_dash():
     assert format_time_left("not-a-date", _now()) == "—"
+
+
+def test_time_left_tz_naive_enddate_is_dash_not_crash():
+    # A timestamp lacking 'Z'/offset parses to a NAIVE datetime; subtracting it
+    # from the tz-aware `now` would raise TypeError. Must render '—', not crash.
+    assert format_time_left("2026-07-05T16:00:00", _now()) == "—"
